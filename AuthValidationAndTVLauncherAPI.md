@@ -176,6 +176,42 @@ Example config:
       "action": "projectorSettings"
     }
   ],
+  "quickSelect": [
+    {
+      "id": "sky-sports",
+      "label": "Sky Sports",
+      "icon": "tv",
+      "order": 10,
+      "inputId": "android.tv.input/.Service/HW1",
+      "url": "https://example.com/api/skyq/channel/401",
+      "method": "POST",
+      "body": {
+        "room": "lounge"
+      },
+      "requestBeforeInput": true
+    }
+  ],
+  "remoteControl": {
+    "enabled": true,
+    "onlyWhenInputActive": true,
+    "keys": {
+      "KEYCODE_CHANNEL_UP": {
+        "url": "https://example.com/api/skyq/channel-up",
+        "method": "POST",
+        "consume": true
+      },
+      "KEYCODE_CHANNEL_DOWN": {
+        "url": "https://example.com/api/skyq/channel-down",
+        "method": "POST",
+        "consume": true
+      }
+    }
+  },
+  "notificationServer": {
+    "enabled": true,
+    "duration": 8,
+    "position": 1
+  },
   "settings": {
     "requiredService": "example.tvlauncher.admin",
     "unlockRequiredService": "example.tvlauncher.unlock",
@@ -188,12 +224,77 @@ Example config:
     "sleepClockYOffsetDp": 120,
     "lockedClockYOffsetDp": 0,
     "unlockValidationSeconds": 14400,
+    "activeInputSeconds": 21600,
     "burnInShiftDp": 28,
     "burnInPeriodSeconds": 240,
     "backgroundImageUrl": "https://example.com/wallpaper.jpg",
     "updateApkUrl": "https://example.com/projector-launcher.apk"
+  },
+  "deviceStatus": {
+    "tvId": "example-tv-id",
+    "ipAddress": "192.168.1.50",
+    "notificationUrl": "http://192.168.1.50:7980/notify",
+    "notificationStatusUrl": "http://192.168.1.50:7980/status",
+    "notificationServerEnabled": true,
+    "launcherVersion": "0.2.2",
+    "manufacturer": "Example",
+    "model": "Android TV",
+    "lastSeen": 1783636370
   }
 }
+```
+
+The launcher also exposes a local TV API on `deviceStatus.notificationStatusUrl`'s host/port:
+
+```http
+GET http://{tvIp}:7980/status
+GET http://{tvIp}:7980/config
+GET http://{tvIp}:7980/options
+GET http://{tvIp}:7980/inputs
+POST http://{tvIp}:7980/notify
+POST http://{tvIp}:7980/input
+POST http://{tvIp}:7980/key
+POST http://{tvIp}:7980/action
+GET http://{tvIp}:7980/sleep
+```
+
+`/config` and `/options` return the TV status, cached server config, detected input IDs/labels, remote-control mapping, notification settings, supported local endpoints, and common keycode options. `/inputs` returns only the input list.
+
+Input selection accepts:
+
+```json
+{
+  "inputId": "android.tv.input/.Service/HW1",
+  "label": "Sky Q"
+}
+```
+
+Key sending accepts Android key names or numeric codes:
+
+```json
+{
+  "keyCode": "KEYCODE_DPAD_CENTER"
+}
+```
+
+Some Android TVs block `/key` from controlling another focused app because non-system apps do not have `INJECT_EVENTS`. For TV-wide actions use the Accessibility-backed action endpoint:
+
+```json
+{
+  "action": "sleep"
+}
+```
+
+Supported action names include `back`, `home`, `recents`, `notifications`, `quick-settings`, `power-dialog`, `sleep`, `lock-screen`, and `screenshot` where Android supports them.
+
+Simple GET forms are also supported:
+
+```http
+GET http://{tvIp}:7980/input/{urlEncodedInputId}
+GET http://{tvIp}:7980/key/KEYCODE_BACK
+GET http://{tvIp}:7980/key?keyCode=4
+GET http://{tvIp}:7980/action/sleep
+GET http://{tvIp}:7980/sleep
 ```
 
 ### Patch Config Keys

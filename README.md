@@ -33,6 +33,8 @@ The launcher uses this TV id format:
 
 It reads and creates config using the endpoints in `AuthValidationAndTVLauncherAPI.md`.
 
+There is also a public-safe Express/MongoDB example in [backend/README.md](backend/README.md). It stores launcher config, accepts the TV's `deviceStatus` patches, and includes optional proxy routes for notifications, input selection, key/action requests, and reading the TV-local `/options` endpoint.
+
 Supported JSON shape:
 
 ```json
@@ -67,6 +69,42 @@ Supported JSON shape:
       "intentAction": "android.settings.DISPLAY_SETTINGS"
     }
   ],
+  "quickSelect": [
+    {
+      "id": "sky-sports",
+      "label": "Sky Sports",
+      "icon": "tv",
+      "order": 10,
+      "inputId": "android.tv.input/.Service/HW1",
+      "url": "https://example.local/api/skyq/channel/401",
+      "method": "POST",
+      "body": {
+        "room": "lounge"
+      },
+      "requestBeforeInput": true
+    }
+  ],
+  "remoteControl": {
+    "enabled": true,
+    "onlyWhenInputActive": true,
+    "keys": {
+      "KEYCODE_CHANNEL_UP": {
+        "url": "https://example.local/api/skyq/channel-up",
+        "method": "POST",
+        "consume": true
+      },
+      "KEYCODE_CHANNEL_DOWN": {
+        "url": "https://example.local/api/skyq/channel-down",
+        "method": "POST",
+        "consume": true
+      }
+    }
+  },
+  "notificationServer": {
+    "enabled": true,
+    "duration": 8,
+    "position": 1
+  },
   "settings": {
     "requiredService": "example.tvlauncher.admin",
     "unlockRequiredService": "example.tvlauncher.unlock",
@@ -79,6 +117,7 @@ Supported JSON shape:
     "sleepClockYOffsetDp": 120,
     "lockedClockYOffsetDp": 0,
     "unlockValidationSeconds": 14400,
+    "activeInputSeconds": 21600,
     "burnInShiftDp": 28,
     "burnInPeriodSeconds": 240,
     "backgroundImageUrl": "https://example.local/wallpaper.jpg",
@@ -129,6 +168,89 @@ Projector menu options:
 - `intentAction` can be used instead of `action` for a device/vendor settings intent.
 - Menu items support the same `icon` and `iconImageUrl` fields as inputs.
 - Menu items also support `order`; lower numbers appear first in the menu group after the inputs.
+
+Quick select options:
+
+- Put quick actions in top-level `quickSelect` or `settings.quickSelect`.
+- `inputId` is the Android TV input to open after selecting the tile.
+- `url` / `requestUrl` is called when the tile is selected. Absolute URLs are used directly; paths starting with `/` are resolved against `tvLauncherBaseUrl`.
+- `method` / `requestMethod` supports `GET` or `POST`. Non-GET requests send `body` / `requestBody` as JSON.
+- `requestBeforeInput` defaults to `true`. Set it to `false` if the input should open before the backend request is sent.
+- Quick-select tiles support `icon`, `iconImageUrl`, and `order`.
+
+Remote bridge options:
+
+- Put remote bridge config in top-level `remoteControl` or `settings.remoteControl`.
+- The user must enable `Projector Launcher Remote Bridge` in Android Accessibility settings on each TV.
+- `enabled` must be `true` before the service sends requests.
+- `onlyWhenInputActive` defaults to `true`; this keeps key interception limited to the period after the launcher opens an input.
+- `settings.activeInputSeconds` controls how long an opened input is treated as active. Default: `21600` seconds / 6 hours.
+- `keys` maps Android key names or numeric key codes to request actions.
+- `consume` defaults to `true`, but keys are only consumed while an input is marked active. Set `consume: false` to send the backend request while still allowing the TV/input app to receive the key.
+
+Device status:
+
+- The launcher patches a top-level `deviceStatus` object back to the server when the IP changes and periodically while online.
+- `deviceStatus` includes `ipAddress`, `notificationUrl`, `notificationStatusUrl`, `notificationServerEnabled`, `launcherVersion`, `manufacturer`, `model`, and `lastSeen`.
+
+Notification server:
+
+- Put notification settings in top-level `notificationServer` or `settings.notificationServer`.
+- The built-in local TV API listens on port `7980`.
+- `GET /status` returns a JSON status payload.
+- `GET /config` and `GET /options` return the TV status, last server config, detected inputs, remote-control config, notification config, supported endpoints, and common keycode options.
+- `GET /inputs` returns just the detected TV input IDs and labels.
+- `POST /notify` accepts JSON with `title`, `message`, `duration`, `position`, `backgroundColor`, `titleColor`, `titleSize`, `messageColor`, `messageSize`, and PiPup-style `media.image.uri` / `media.image.width`.
+- Direct `imageurl` / `imagewidth` fields are also accepted.
+- `POST /input` with `{ "inputId": "..." }` opens a connected TV input by Android input ID.
+- `GET /input/{url-encoded-input-id}` also opens an input.
+- `POST /key` with `{ "keyCode": "KEYCODE_BACK" }` or `{ "keyCode": 4 }` sends an Android keycode.
+- `GET /key/KEYCODE_BACK` and `GET /key?keyCode=4` are also supported.
+- Android TV firmware may block injected keys from non-system apps when another app/input is focused. The API returns `ok:false` with the Android error if that happens.
+- `POST /action` with `{ "action": "sleep" }` or `GET /action/sleep` runs an Accessibility global action. Supported names include `back`, `home`, `recents`, `notifications`, `quick-settings`, `power-dialog`, `sleep`, `lock-screen`, and `screenshot` where Android supports them.
+- `GET /action/input-settings` opens the TV input settings/input picker when the firmware exposes one.
+- If `/key` is blocked by Android, known system keys fall back automatically: `KEYCODE_BACK`, `KEYCODE_HOME`, `KEYCODE_SLEEP`, `KEYCODE_POWER`, and `KEYCODE_TV_INPUT`.
+- `GET /sleep` is a shortcut for the `sleep` Accessibility action. The Accessibility service must be enabled.
+- To show over HDMI/input apps, Android must allow overlay windows for the launcher. On many Android TVs this needs ADB:
+
+```sh
+adb shell appops set com.tds.projectorlauncher SYSTEM_ALERT_WINDOW allow
+```
+
+Example:
+
+```sh
+curl -X POST http://TV_IP:7980/notify \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "duration":45,
+    "title":"Front door",
+    "message":"Someone is at the door",
+    "backgroundColor":"#ffffff",
+    "titleColor":"#0066cc",
+    "titleSize":"20",
+    "messageColor":"#000000",
+    "messageSize":14,
+    "media":{"image":{"uri":"https://example.local/snapshot.jpg","width":800}}
+  }'
+```
+
+Input and key examples:
+
+```sh
+curl http://TV_IP:7980/config
+curl http://TV_IP:7980/inputs
+
+curl -X POST http://TV_IP:7980/input \
+  -H 'Content-Type: application/json' \
+  -d '{"inputId":"android.tv.input/.Service/HW1","label":"Sky Q"}'
+
+curl -X POST http://TV_IP:7980/key \
+  -H 'Content-Type: application/json' \
+  -d '{"keyCode":"KEYCODE_DPAD_CENTER"}'
+
+curl http://TV_IP:7980/action/sleep
+```
 
 ## Building
 

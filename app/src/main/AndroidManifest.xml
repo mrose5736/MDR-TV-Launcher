@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -27,5 +28,21 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".RemoteBridgeAccessibilityService"
+            android:exported="true"
+            android:label="@string/remote_bridge_service_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/remote_bridge_accessibility_service" />
+        </service>
+        <service
+            android:name=".NotificationServerService"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 </manifest>

@@ -77,6 +77,16 @@ public class MainActivity extends Activity {
     private static final String PREF_BACKGROUND_URL = "cached_background_url";
     private static final String PREF_ADMIN_VALID_UNTIL = "admin_valid_until";
     private static final String PREF_LOCK_VALID_UNTIL = "lock_valid_until";
+    static final String PREF_SERVER_CONFIG = "server_config";
+    static final String PREF_INPUTS_STATE = "inputs_state";
+    static final String PREF_REMOTE_CONFIG = "remote_control_config";
+    static final String PREF_NOTIFICATION_CONFIG = "notification_server_config";
+    static final String PREF_NOTIFICATION_PORT = "notification_server_port";
+    static final String PREF_TV_ID = "tv_id";
+    static final String PREF_DEVICE_IP = "device_ip";
+    private static final int NOTIFICATION_PORT = 7980;
+    static final String PREF_ACTIVE_INPUT_ID = "active_input_id";
+    static final String PREF_ACTIVE_INPUT_UNTIL = "active_input_until";
     private static final String CACHED_BACKGROUND_FILE = "cached_background_image";
 
     private ProjectorLauncherView launcherView;
@@ -94,6 +104,7 @@ public class MainActivity extends Activity {
     private String tvName = "";
     private String tvSubtitle = "";
     private final List<MenuItem> projectorMenuItems = new ArrayList<>();
+    private final List<QuickSelectItem> quickSelectItems = new ArrayList<>();
     private boolean serverConfigLoaded = false;
     private boolean offlineLockEnabled = false;
     private String offlineLockMessage = "";
@@ -114,6 +125,9 @@ public class MainActivity extends Activity {
     private int burnInShiftDp = 28;
     private int burnInPeriodSeconds = 240;
     private String currentIpAddress = "IP unavailable";
+    private String lastPostedIpAddress = "";
+    private int lastPostedNotificationPort = -1;
+    private long lastDeviceStatusPostMs = 0L;
     private long lastInteractionMs = System.currentTimeMillis();
     private AuthSession authSession;
 
@@ -138,6 +152,8 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             currentIpAddress = getCurrentIpAddress();
+            persistDeviceIp();
+            postDeviceStatusIfNeeded(false);
             if (launcherView != null) {
                 launcherView.invalidate();
             }
@@ -177,12 +193,17 @@ public class MainActivity extends Activity {
 
         tvInputManager = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
         tvId = buildTvId();
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_TV_ID, tvId)
+                .apply();
         loadCachedApprovals();
         launcherView = new ProjectorLauncherView(this);
         loadCachedBackground();
         setContentView(launcherView);
         hideSystemUi();
         loadInputs();
+        startNotificationServer();
         fetchOrCreateConfig();
     }
 
@@ -194,6 +215,7 @@ public class MainActivity extends Activity {
             tvInputManager.registerCallback(tvInputCallback, handler);
         }
         loadInputs();
+        clearActiveInput();
         handler.removeCallbacks(clockTick);
         handler.post(clockTick);
         handler.removeCallbacks(configPoll);
@@ -271,6 +293,7 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        saveInputsState(allInputs);
         launcherView.setInputs(allInputs);
     }
 
@@ -318,6 +341,7 @@ public class MainActivity extends Activity {
         settings.put("burnInPeriodSeconds", 240);
         settings.put("backgroundImageUrl", "");
         settings.put("updateApkUrl", "");
+        settings.put("activeInputSeconds", 21600);
         body.put("settings", settings);
 
         try {
@@ -348,6 +372,10 @@ public class MainActivity extends Activity {
         offlineLockEnabled = false;
         offlineLockMessage = "";
         serverConfig = config;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_SERVER_CONFIG, config.toString())
+                .apply();
         tvName = config.optString("name", "");
         tvSubtitle = config.optString("subtitle", config.optString("description", config.optString("room", "")));
         serverLockEnabled = false;
@@ -394,7 +422,12 @@ public class MainActivity extends Activity {
             }
         }
         parseProjectorMenu(config);
+        parseQuickSelect(config);
+        saveRemoteBridgeConfig(config);
+        saveNotificationServerConfig(config);
+        startNotificationServer();
         serverConfigLoaded = true;
+        postDeviceStatusIfNeeded(true);
         handler.post(() -> {
             if (launcherView != null) {
                 launcherView.applyConfig();
@@ -438,11 +471,98 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void parseQuickSelect(JSONObject config) {
+        quickSelectItems.clear();
+        JSONArray items = config.optJSONArray("quickSelect");
+        JSONObject settings = config.optJSONObject("settings");
+        if (items == null && settings != null) {
+            items = settings.optJSONArray("quickSelect");
+        }
+        if (items == null) {
+            return;
+        }
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null || item.optBoolean("hidden", false)) {
+                continue;
+            }
+            QuickSelectItem quick = new QuickSelectItem();
+            quick.id = item.optString("id", "quick-" + i);
+            quick.label = item.optString("label", "Quick");
+            quick.icon = item.optString("icon", "tv");
+            quick.iconImageUrl = item.optString("iconImageUrl", item.optString("iconUrl", ""));
+            quick.inputId = item.optString("inputId", "");
+            quick.url = item.optString("url", item.optString("requestUrl", ""));
+            quick.method = item.optString("method", item.optString("requestMethod", "POST"));
+            quick.body = item.opt("body");
+            if (quick.body == null) {
+                quick.body = item.opt("requestBody");
+            }
+            quick.requestBeforeInput = item.optBoolean("requestBeforeInput", true);
+            quick.order = item.optInt("order", i);
+            quickSelectItems.add(quick);
+            if (quick.iconImageUrl.length() > 0 && !quick.iconImageUrl.equals(inputIconUrls.get(quick.id))) {
+                downloadInputIcon(quick.id, quick.iconImageUrl);
+            }
+        }
+        Collections.sort(quickSelectItems, new Comparator<QuickSelectItem>() {
+            @Override
+            public int compare(QuickSelectItem first, QuickSelectItem second) {
+                return first.order - second.order;
+            }
+        });
+    }
+
+    private void saveRemoteBridgeConfig(JSONObject config) {
+        JSONObject remote = config.optJSONObject("remoteControl");
+        JSONObject settings = config.optJSONObject("settings");
+        if (remote == null && settings != null) {
+            remote = settings.optJSONObject("remoteControl");
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_REMOTE_CONFIG, remote == null ? "{}" : remote.toString())
+                .apply();
+    }
+
+    private void saveNotificationServerConfig(JSONObject config) {
+        JSONObject notification = config.optJSONObject("notificationServer");
+        JSONObject settings = config.optJSONObject("settings");
+        if (notification == null && settings != null) {
+            notification = settings.optJSONObject("notificationServer");
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_NOTIFICATION_CONFIG, notification == null ? "{}" : notification.toString())
+                .apply();
+    }
+
+    private void saveInputsState(List<InputItem> inputs) {
+        JSONArray items = new JSONArray();
+        for (InputItem input : inputs) {
+            JSONObject item = new JSONObject();
+            try {
+                item.put("id", input.id);
+                item.put("label", input.label);
+                item.put("connected", input.connected);
+                items.put(item);
+            } catch (JSONException ignored) {
+                // Skip malformed input rows.
+            }
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_INPUTS_STATE, items.toString())
+                .apply();
+    }
+
     private void patchServerKeys(JSONObject keys, String successMessage) {
         new Thread(() -> {
             try {
                 httpPost(BASE_URL + "/api/tvlauncher/" + urlPart(tvId) + "/keys", keys.toString());
-                postStatus(successMessage);
+                if (successMessage != null && successMessage.length() > 0) {
+                    postStatus(successMessage);
+                }
             } catch (Exception error) {
                 postStatus("Config save failed");
             }
@@ -470,6 +590,81 @@ public class MainActivity extends Activity {
             patchServerKeys(body, successMessage);
         } catch (JSONException ignored) {
             postStatus("Config save failed");
+        }
+    }
+
+    private void postDeviceStatusIfNeeded(boolean force) {
+        if (!serverConfigLoaded || tvId == null || tvId.length() == 0) {
+            return;
+        }
+        String ip = cleanIpAddress(currentIpAddress);
+        int notificationPort = notificationServerPort();
+        long nowMs = System.currentTimeMillis();
+        boolean ipChanged = ip.length() > 0 && !ip.equals(lastPostedIpAddress);
+        boolean portChanged = notificationPort != lastPostedNotificationPort;
+        boolean expired = nowMs - lastDeviceStatusPostMs > 300000L;
+        if (!force && !ipChanged && !portChanged && !expired) {
+            return;
+        }
+        lastPostedIpAddress = ip;
+        lastPostedNotificationPort = notificationPort;
+        lastDeviceStatusPostMs = nowMs;
+        JSONObject body = new JSONObject();
+        JSONObject status = new JSONObject();
+        try {
+            status.put("tvId", tvId);
+            status.put("ipAddress", ip);
+            status.put("notificationUrl", ip.length() == 0 ? "" : "http://" + ip + ":" + notificationPort + "/notify");
+            status.put("notificationStatusUrl", ip.length() == 0 ? "" : "http://" + ip + ":" + notificationPort + "/status");
+            status.put("notificationServerEnabled", notificationServerEnabled());
+            status.put("launcherVersion", LAUNCHER_VERSION);
+            status.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
+            status.put("model", Build.MODEL == null ? "" : Build.MODEL);
+            status.put("lastSeen", System.currentTimeMillis() / 1000L);
+            body.put("deviceStatus", status);
+            patchServerKeys(body, "");
+        } catch (JSONException ignored) {
+            // Status is best effort.
+        }
+    }
+
+    private String cleanIpAddress(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("IP ", "").trim();
+    }
+
+    private void persistDeviceIp() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_DEVICE_IP, cleanIpAddress(currentIpAddress))
+                .apply();
+    }
+
+    private boolean notificationServerEnabled() {
+        try {
+            JSONObject config = new JSONObject(getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_NOTIFICATION_CONFIG, "{}"));
+            return config.optBoolean("enabled", true);
+        } catch (JSONException ignored) {
+            return true;
+        }
+    }
+
+    private int notificationServerPort() {
+        int activePort = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(PREF_NOTIFICATION_PORT, -1);
+        if (activePort > 0) {
+            return activePort;
+        }
+        return NOTIFICATION_PORT;
+    }
+
+    private void startNotificationServer() {
+        Intent intent = new Intent(this, NotificationServerService.class);
+        try {
+            startService(intent);
+        } catch (Exception ignored) {
+            // Some TV builds may restrict service start; launcher remains usable.
         }
     }
 
@@ -639,6 +834,45 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void sendConfiguredRequest(String rawUrl, String method, Object body, String successMessage) {
+        String url = resolveConfiguredUrl(rawUrl);
+        if (url.length() == 0) {
+            return;
+        }
+        new Thread(() -> {
+            try {
+                String verb = method == null ? "POST" : method.trim().toUpperCase(Locale.UK);
+                if ("GET".equals(verb)) {
+                    httpGet(url);
+                } else {
+                    httpPost(url, body == null ? "{}" : String.valueOf(body));
+                }
+                if (successMessage != null && successMessage.length() > 0) {
+                    postStatus(successMessage);
+                }
+            } catch (Exception error) {
+                postStatus("Quick action failed");
+            }
+        }).start();
+    }
+
+    private String resolveConfiguredUrl(String rawUrl) {
+        if (rawUrl == null) {
+            return "";
+        }
+        String url = rawUrl.trim();
+        if (url.length() == 0) {
+            return "";
+        }
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        if (url.startsWith("/")) {
+            return BASE_URL + url;
+        }
+        return url;
+    }
+
     private void launchInput(InputItem item) {
         String label = launcherView == null ? item.label : launcherView.displayLabel(item);
         Uri inputUri = TvContract.buildChannelUriForPassthroughInput(item.id);
@@ -648,10 +882,31 @@ public class MainActivity extends Activity {
         intent.putExtra("android.media.tv.extra.INPUT_NAME", label);
         try {
             Toast.makeText(this, label, Toast.LENGTH_SHORT).show();
+            markActiveInput(item.id);
             startActivity(intent);
         } catch (ActivityNotFoundException error) {
+            clearActiveInput();
             Toast.makeText(this, "This projector does not expose a standard input switcher.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void markActiveInput(String inputId) {
+        JSONObject settings = serverConfig.optJSONObject("settings");
+        int activeSeconds = settings == null ? 21600 : Math.max(60, settings.optInt("activeInputSeconds", 21600));
+        long until = System.currentTimeMillis() / 1000L + activeSeconds;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_ACTIVE_INPUT_ID, inputId == null ? "" : inputId)
+                .putLong(PREF_ACTIVE_INPUT_UNTIL, until)
+                .apply();
+    }
+
+    private void clearActiveInput() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_ACTIVE_INPUT_ID, "")
+                .putLong(PREF_ACTIVE_INPUT_UNTIL, 0L)
+                .apply();
     }
 
     private void openSystemSettings() {
@@ -896,6 +1151,19 @@ public class MainActivity extends Activity {
         String iconImageUrl;
         String action;
         String intentAction;
+        int order;
+    }
+
+    private static final class QuickSelectItem {
+        String id;
+        String label;
+        String icon;
+        String iconImageUrl;
+        String inputId;
+        String url;
+        String method;
+        Object body;
+        boolean requestBeforeInput;
         int order;
     }
 
@@ -1321,6 +1589,7 @@ public class MainActivity extends Activity {
             drawClock(canvas, homeFocus == clockIndex(), false, 0);
             drawTitle(canvas);
             drawSourceSection(canvas);
+            drawQuickSelectSection(canvas);
             drawStatusLine(canvas);
         }
 
@@ -1397,7 +1666,7 @@ public class MainActivity extends Activity {
 
         private void drawSourceSection(Canvas canvas) {
             float left = dp(52);
-            float top = getHeight() * 0.48f;
+            float top = getHeight() * 0.40f;
             textPaint.setTextAlign(Paint.Align.LEFT);
             textPaint.setTextSize(sp(18));
             textPaint.setFakeBoldText(true);
@@ -1430,6 +1699,28 @@ public class MainActivity extends Activity {
                 int focusIndex = visibleInputs.size() + lockTileCount + i;
                 float x = left + focusIndex * (cardWidth + gap);
                 drawMenuCard(canvas, projectorMenuItems.get(i), homeFocus == focusIndex, x, top, cardWidth, cardHeight);
+            }
+        }
+
+        private void drawQuickSelectSection(Canvas canvas) {
+            if (quickSelectItems.isEmpty()) {
+                return;
+            }
+            float left = dp(52);
+            float top = getHeight() * 0.40f + dp(176);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(16));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(Color.WHITE);
+            canvas.drawText("Quick Select", left, top - dp(18), textPaint);
+
+            float cardWidth = dp(124);
+            float cardHeight = dp(66);
+            float gap = dp(12);
+            int quickStart = quickStartIndex();
+            for (int i = 0; i < quickSelectItems.size(); i++) {
+                float x = left + i * (cardWidth + gap);
+                drawQuickSelectCard(canvas, quickSelectItems.get(i), homeFocus == quickStart + i, x, top, cardWidth, cardHeight);
             }
         }
 
@@ -1469,6 +1760,25 @@ public class MainActivity extends Activity {
             textPaint.setFakeBoldText(true);
             textPaint.setColor(Color.WHITE);
             canvas.drawText(item.label == null ? "Menu" : item.label, x + dp(10), y + height + dp(24), textPaint);
+        }
+
+        private void drawQuickSelectCard(Canvas canvas, QuickSelectItem item, boolean focused, float x, float y, float width, float height) {
+            rect.set(x, y, x + width, y + height);
+            cardPaint.setStyle(Paint.Style.FILL);
+            cardPaint.setColor(focused ? Color.argb(238, 245, 245, 245) : Color.argb(185, 18, 18, 18));
+            canvas.drawRoundRect(rect, dp(8), dp(8), cardPaint);
+            if (focused) {
+                focusPaint.setStrokeWidth(dp(3));
+                focusPaint.setColor(Color.WHITE);
+                canvas.drawRoundRect(rect, dp(8), dp(8), focusPaint);
+            }
+
+            drawPresetIcon(canvas, item.id, item.icon, x + width / 2f, y + dp(30), focused ? Color.rgb(20, 20, 20) : Color.WHITE);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(13));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(Color.WHITE);
+            canvas.drawText(item.label == null ? "Quick" : item.label, x + dp(8), y + height + dp(20), textPaint);
         }
 
         private void drawLockCard(Canvas canvas, boolean focused, float x, float y, float width, float height) {
@@ -1863,6 +2173,7 @@ public class MainActivity extends Activity {
         private boolean handleHomeKeyDown(int keyCode) {
             int tileCount = homeTileCount();
             int clockIndex = clockIndex();
+            int quickStart = quickStartIndex();
             if (keyCode == KeyEvent.KEYCODE_MENU) {
                 requestAdminAccess();
                 return true;
@@ -1886,13 +2197,19 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                homeFocus = clockIndex;
+                if (homeFocus >= quickStart && !quickSelectItems.isEmpty()) {
+                    homeFocus = primaryTileCount() > 0 ? 0 : clockIndex;
+                } else {
+                    homeFocus = clockIndex;
+                }
                 invalidate();
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                 if (homeFocus == clockIndex && tileCount > 0) {
                     homeFocus = 0;
+                } else if (homeFocus < quickStart && !quickSelectItems.isEmpty()) {
+                    homeFocus = quickStart;
                 }
                 invalidate();
                 return true;
@@ -1930,6 +2247,8 @@ public class MainActivity extends Activity {
                 lockTvNow();
             } else if (homeFocus < inputCount + lockTileCount + projectorMenuItems.size()) {
                 activateMenuItem(projectorMenuItems.get(homeFocus - inputCount - lockTileCount));
+            } else if (homeFocus < quickStartIndex() + quickSelectItems.size()) {
+                activateQuickSelect(quickSelectItems.get(homeFocus - quickStartIndex()));
             } else {
                 requestAdminAccess();
             }
@@ -1940,7 +2259,42 @@ public class MainActivity extends Activity {
         }
 
         private int homeTileCount() {
+            return primaryTileCount() + quickSelectItems.size();
+        }
+
+        private int primaryTileCount() {
             return visibleInputs.size() + (showHomeLockTile() ? 1 : 0) + projectorMenuItems.size();
+        }
+
+        private int quickStartIndex() {
+            return primaryTileCount();
+        }
+
+        private void activateQuickSelect(QuickSelectItem item) {
+            InputItem input = findInputById(item.inputId);
+            if (item.requestBeforeInput) {
+                sendConfiguredRequest(item.url, item.method, item.body, item.label + " requested");
+            }
+            if (input != null) {
+                launchInput(input);
+            } else {
+                Toast.makeText(getContext(), "Quick input is not available.", Toast.LENGTH_LONG).show();
+            }
+            if (!item.requestBeforeInput) {
+                sendConfiguredRequest(item.url, item.method, item.body, item.label + " requested");
+            }
+        }
+
+        private InputItem findInputById(String inputId) {
+            if (inputId == null || inputId.trim().length() == 0) {
+                return null;
+            }
+            for (InputItem item : allInputs) {
+                if (inputId.equals(item.id)) {
+                    return item;
+                }
+            }
+            return null;
         }
 
         private void activateMenuItem(MenuItem item) {

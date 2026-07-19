@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Projector Launcher</string>
+    <string name="remote_bridge_service_name">Projector Launcher Remote Bridge</string>
 </resources>

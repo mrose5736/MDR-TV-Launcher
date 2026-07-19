@@ -20,23 +20,59 @@ Example saved launcher data:
 ```json
 {
   "name": "Kitchen TV",
+  "subtitle": "Choose a source",
   "room": "Kitchen",
-  "launcherVersion": "1.0.0",
-  "apps": [
-    {
-      "id": "live-tv",
-      "label": "Live TV",
-      "package": "com.example.livetv"
-    },
-    {
-      "id": "cameras",
-      "label": "Cameras",
-      "url": "https://example.local/cameras"
+  "launcherVersion": "0.2.2",
+  "inputs": {
+    "input_example_hdmi_1": {
+      "inputId": "com.example.tvinput/.TvPassThroughService/HW1",
+      "label": "Sky Q",
+      "hidden": false,
+      "order": 1,
+      "icon": "tv"
     }
   ],
+  "quickSelect": [
+    {
+      "id": "sports",
+      "label": "Sports",
+      "inputId": "com.example.tvinput/.TvPassThroughService/HW1",
+      "url": "/api/devices/1020/channel/401/",
+      "method": "GET",
+      "requestBeforeInput": true
+    }
+  ],
+  "remoteControl": {
+    "enabled": true,
+    "onlyWhenInputActive": true,
+    "keys": {
+      "KEYCODE_CHANNEL_UP": {
+        "url": "/api/devices/1020/push/9/",
+        "method": "GET",
+        "consume": true
+      }
+    }
+  },
+  "notificationServer": {
+    "enabled": true,
+    "duration": 8,
+    "position": 1
+  },
   "settings": {
+    "adminAuthRequired": true,
+    "lockScreenEnabled": false,
+    "configPollSeconds": 20,
     "screensaverSeconds": 300,
-    "defaultApp": "live-tv"
+    "backgroundImageUrl": "https://example.local/wallpaper.jpg"
+  },
+  "deviceStatus": {
+    "tvId": "kitchen-tv",
+    "ipAddress": "192.168.1.50",
+    "notificationUrl": "http://192.168.1.50:7980/notify",
+    "notificationStatusUrl": "http://192.168.1.50:7980/status",
+    "notificationServerEnabled": true,
+    "launcherVersion": "0.2.2",
+    "lastSeen": 1783636370
   }
 }
 ```
@@ -52,6 +88,13 @@ POST /api/tvlauncher/:tvId/data
 POST /api/tvlauncher/:tvId/keys
 GET  /api/tvlauncher/:tvId
 GET  /api/tvlauncher/:tvId/data
+GET  /api/tvlauncher/:tvId/local/options
+POST /api/tvlauncher/:tvId/local/notify
+POST /api/tvlauncher/:tvId/local/input
+GET  /api/tvlauncher/:tvId/local/input/:inputId
+POST /api/tvlauncher/:tvId/local/key
+POST /api/tvlauncher/:tvId/local/action
+GET  /api/tvlauncher/:tvId/local/action/:action
 ```
 
 ## Create Once
@@ -69,11 +112,11 @@ Input:
 {
   "name": "Kitchen TV",
   "room": "Kitchen",
-  "launcherVersion": "1.0.0",
-  "apps": [],
+  "launcherVersion": "0.2.2",
+  "inputs": {},
   "settings": {
     "screensaverSeconds": 300,
-    "defaultApp": "live-tv"
+    "configPollSeconds": 20
   }
 }
 ```
@@ -89,11 +132,11 @@ Created response:
   "data": {
     "name": "Kitchen TV",
     "room": "Kitchen",
-    "launcherVersion": "1.0.0",
-    "apps": [],
+    "launcherVersion": "0.2.2",
+    "inputs": {},
     "settings": {
       "screensaverSeconds": 300,
-      "defaultApp": "live-tv"
+      "configPollSeconds": 20
     }
   }
 }
@@ -152,19 +195,22 @@ Input:
 
 ```json
 {
-  "launcherVersion": "1.0.2",
-  "lastSeen": 1783636370,
+  "deviceStatus": {
+    "ipAddress": "192.168.1.50",
+    "notificationUrl": "http://192.168.1.50:7980/notify",
+    "notificationStatusUrl": "http://192.168.1.50:7980/status",
+    "lastSeen": 1783636370
+  },
   "settings": {
     "screensaverSeconds": 120,
-    "defaultApp": "cameras"
+    "lockScreenEnabled": false
   }
 }
 ```
 
 This updates only the top-level keys included in the request body:
 
-- `launcherVersion`
-- `lastSeen`
+- `deviceStatus`
 - `settings`
 
 It preserves all other keys already stored for that TV.
@@ -191,11 +237,11 @@ Response:
 {
   "name": "Kitchen TV",
   "room": "Kitchen",
-  "launcherVersion": "1.0.2",
-  "apps": [],
+  "launcherVersion": "0.2.2",
+  "inputs": {},
   "settings": {
     "screensaverSeconds": 120,
-    "defaultApp": "cameras"
+    "lockScreenEnabled": false
   }
 }
 ```
@@ -209,6 +255,103 @@ Not found response:
   "code": 404
 }
 ```
+
+## Local TV API Proxy Examples
+
+The launcher reports its local API URLs in the top-level `deviceStatus` object. This example backend includes convenience routes that read those URLs from MongoDB and call the TV on port `7980`.
+
+These are optional, but they are useful when you want your backend to control a TV without hard-coding the TV IP in every integration.
+
+Read the TV-local options/config snapshot:
+
+```http
+GET /api/tvlauncher/kitchen-tv/local/options
+```
+
+Show a PiPup-style notification:
+
+```http
+POST /api/tvlauncher/kitchen-tv/local/notify
+Content-Type: application/json
+```
+
+```json
+{
+  "duration": 45,
+  "title": "Front door",
+  "message": "Someone is at the door",
+  "backgroundColor": "#ffffff",
+  "titleColor": "#0066cc",
+  "messageColor": "#000000",
+  "messageSize": 14,
+  "media": {
+    "image": {
+      "uri": "https://example.local/snapshot.jpg",
+      "width": 800
+    }
+  }
+}
+```
+
+Open an input by Android input ID:
+
+```http
+POST /api/tvlauncher/kitchen-tv/local/input
+Content-Type: application/json
+```
+
+```json
+{
+  "inputId": "com.example.tvinput/.TvPassThroughService/HW1",
+  "label": "Sky Q"
+}
+```
+
+Equivalent GET shortcut using a URL-encoded input ID:
+
+```http
+GET /api/tvlauncher/kitchen-tv/local/input/com.example.tvinput%2F.TvPassThroughService%2FHW1
+```
+
+Run an Accessibility-backed TV action:
+
+```http
+POST /api/tvlauncher/kitchen-tv/local/action
+Content-Type: application/json
+```
+
+```json
+{
+  "action": "sleep"
+}
+```
+
+Equivalent shortcut:
+
+```http
+GET /api/tvlauncher/kitchen-tv/local/action/sleep
+```
+
+Send a keycode:
+
+```http
+POST /api/tvlauncher/kitchen-tv/local/key
+Content-Type: application/json
+```
+
+```json
+{
+  "keyCode": "KEYCODE_HOME"
+}
+```
+
+Android TV commonly blocks true key injection from normal apps with `INJECT_EVENTS` errors. The launcher falls back for known system keys such as Home, Back, Sleep, Power, and TV Input, but D-pad/channel/number injection may still be blocked by the TV firmware.
+
+## Notes For Public Deployments
+
+This example intentionally has no authentication. Add your own auth, rate limiting, and network restrictions before exposing it beyond a trusted LAN.
+
+The backend only rejects top-level patch keys containing `.` or `$`; this is enough for the launcher's `/keys` usage because the server updates whole top-level fields such as `inputs`, `settings`, `deviceStatus`, `remoteControl`, and `quickSelect`.
 
 ## Running The Example
 

@@ -42,6 +42,98 @@ function validateJsonBody(req, res) {
   return req.body;
 }
 
+async function getLauncherData(tvId, res) {
+  const record = await tvLauncher.findOne(
+    { tvId },
+    { projection: { _id: 0, data: 1 } }
+  );
+
+  if (!record) {
+    res.status(404).json({
+      ok: false,
+      error: "TV launcher data not found",
+      code: 404
+    });
+    return null;
+  }
+
+  return record.data ?? {};
+}
+
+function localTvBaseUrl(data, res) {
+  const notificationStatusUrl = String(data?.deviceStatus?.notificationStatusUrl ?? "");
+  const notificationUrl = String(data?.deviceStatus?.notificationUrl ?? "");
+  const sourceUrl = notificationStatusUrl || notificationUrl;
+
+  if (!sourceUrl) {
+    res.status(409).json({
+      ok: false,
+      error: "TV has not reported a local API URL yet",
+      code: 409
+    });
+    return null;
+  }
+
+  try {
+    const url = new URL(sourceUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    res.status(409).json({
+      ok: false,
+      error: "TV reported an invalid local API URL",
+      code: 409
+    });
+    return null;
+  }
+}
+
+async function callLocalTv(data, path, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 2500);
+  try {
+    const baseUrl = localTvBaseUrl(data, options.res);
+    if (!baseUrl) return null;
+
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: options.method ?? "GET",
+        headers: options.body ? { "Content-Type": "application/json" } : undefined,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal
+      });
+
+      const text = await response.text();
+      let json;
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = { raw: text };
+      }
+
+      return {
+        ok: response.ok && json?.ok !== false,
+        status: response.status,
+        tvResponse: json
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 0,
+        tvResponse: {
+          ok: false,
+          error: error.name === "AbortError" ? "TV local API timed out" : String(error.message ?? error)
+        }
+      };
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function encodePathPart(value) {
+  return encodeURIComponent(String(value ?? ""));
+}
+
 app.post("/api/tvlauncher/:tvId/create", async (req, res) => {
   const tvId = validateTvId(req, res);
   if (!tvId) return;
@@ -167,20 +259,113 @@ app.get(["/api/tvlauncher/:tvId", "/api/tvlauncher/:tvId/data"], async (req, res
   const tvId = validateTvId(req, res);
   if (!tvId) return;
 
-  const record = await tvLauncher.findOne(
-    { tvId },
-    { projection: { _id: 0, data: 1 } }
-  );
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
 
-  if (!record) {
-    return res.status(404).json({
-      ok: false,
-      error: "TV launcher data not found",
-      code: 404
-    });
-  }
+  res.json(data);
+});
 
-  res.json(record.data ?? {});
+app.get("/api/tvlauncher/:tvId/local/options", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, "/options", { res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.post("/api/tvlauncher/:tvId/local/notify", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const body = validateJsonBody(req, res);
+  if (!body) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, "/notify", { method: "POST", body, res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.post("/api/tvlauncher/:tvId/local/input", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const body = validateJsonBody(req, res);
+  if (!body) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, "/input", { method: "POST", body, res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.get("/api/tvlauncher/:tvId/local/input/:inputId", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, `/input/${encodePathPart(req.params.inputId)}`, { res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.post("/api/tvlauncher/:tvId/local/key", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const body = validateJsonBody(req, res);
+  if (!body) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, "/key", { method: "POST", body, res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.post("/api/tvlauncher/:tvId/local/action", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const body = validateJsonBody(req, res);
+  if (!body) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, "/action", { method: "POST", body, res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
+});
+
+app.get("/api/tvlauncher/:tvId/local/action/:action", async (req, res) => {
+  const tvId = validateTvId(req, res);
+  if (!tvId) return;
+
+  const data = await getLauncherData(tvId, res);
+  if (!data) return;
+
+  const result = await callLocalTv(data, `/action/${encodePathPart(req.params.action)}`, { res });
+  if (!result) return;
+
+  res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
 });
 
 app.get("/health", (_req, res) => {
