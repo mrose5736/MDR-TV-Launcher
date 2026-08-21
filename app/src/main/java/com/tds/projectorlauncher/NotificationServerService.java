@@ -24,6 +24,17 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
+import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.PlayerView;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -38,17 +49,25 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.util.Locale;
 
+import okhttp3.OkHttpClient;
+
+@UnstableApi
 public class NotificationServerService extends Service {
     private static final String PREFS_NAME = "projector_launcher";
     private static final String TAG = "TDSNotifyServer";
     private static final int NOTIFICATION_PORT = 7980;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable hideOverlayRunnable = this::hideOverlay;
     private volatile boolean running = false;
     private Thread serverThread;
     private ServerSocket serverSocket;
     private WindowManager windowManager;
     private View currentOverlay;
+    private ExoPlayer currentVideoPlayer;
+    private final OkHttpClient cameraHttpClient = new OkHttpClient.Builder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build();
     private int activePort = -1;
 
     @Override
@@ -244,7 +263,7 @@ public class NotificationServerService extends Service {
             return RemoteBridgeAccessibilityService.performNamedGlobalAction("power-dialog");
         }
         if (keyCode == KeyEvent.KEYCODE_TV_INPUT) {
-            return openInputSettingsResponse();
+            return openInputChooserResponse();
         }
         return null;
     }
@@ -262,19 +281,31 @@ public class NotificationServerService extends Service {
         }
         String normalized = action.trim().toLowerCase(Locale.UK).replace("_", "-");
         if ("input".equals(normalized) || "inputs".equals(normalized) || "input-settings".equals(normalized) || "tv-input".equals(normalized)) {
-            return openInputSettingsResponse();
+            return openInputChooserResponse();
         }
         return RemoteBridgeAccessibilityService.performNamedGlobalAction(action);
     }
 
-    private JSONObject openInputSettingsResponse() throws Exception {
-        JSONObject response = new JSONObject();
-        response.put("action", "input-settings");
-        Intent[] intents = new Intent[]{
+    private JSONObject openInputChooserResponse() throws Exception {
+        return startFirstActivityResponse(
+                "input-chooser",
+                new Intent("com.android.tv.action.VIEW_INPUTS"),
                 new Intent("android.settings.TV_INPUT_SETTINGS"),
                 new Intent("android.settings.INPUT_SETTINGS"),
-                new Intent(Settings.ACTION_SETTINGS)
-        };
+                new Intent(Settings.ACTION_SETTINGS));
+    }
+
+    private JSONObject openInputSettingsResponse() throws Exception {
+        return startFirstActivityResponse(
+                "input-settings",
+                new Intent("android.settings.TV_INPUT_SETTINGS"),
+                new Intent("android.settings.INPUT_SETTINGS"),
+                new Intent(Settings.ACTION_SETTINGS));
+    }
+
+    private JSONObject startFirstActivityResponse(String action, Intent... intents) throws Exception {
+        JSONObject response = new JSONObject();
+        response.put("action", action);
         for (Intent intent : intents) {
             try {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -289,7 +320,7 @@ public class NotificationServerService extends Service {
         }
         response.put("ok", false);
         response.put("sent", false);
-        response.put("error", "no input settings intent available");
+        response.put("error", "no matching activity available");
         return response;
     }
 
@@ -317,10 +348,24 @@ public class NotificationServerService extends Service {
             startActivity(intent);
             response.put("ok", true);
         } catch (Exception error) {
+            JSONObject fallback = inputFallbackResponse(inputId);
+            if (fallback != null) {
+                fallback.put("inputId", inputId);
+                fallback.put("fallbackFromError", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()));
+                return fallback;
+            }
             response.put("ok", false);
             response.put("error", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()));
         }
         return response;
+    }
+
+    private JSONObject inputFallbackResponse(String inputId) throws Exception {
+        if (Build.MANUFACTURER == null || !Build.MANUFACTURER.toLowerCase(Locale.UK).contains("xgimi")) {
+            return null;
+        }
+        markActiveInput(inputId);
+        return openInputChooserResponse();
     }
 
     private int parseKeyCode(String rawKey) {
@@ -504,9 +549,10 @@ public class NotificationServerService extends Service {
             currentOverlay = view;
             try {
                 windowManager.addView(view, params);
-                handler.postDelayed(this::hideOverlay, durationSeconds * 1000L);
+                handler.postDelayed(hideOverlayRunnable, durationSeconds * 1000L);
             } catch (Exception error) {
                 currentOverlay = null;
+                releaseVideoPlayer();
                 Toast.makeText(this, payload.optString("message", "Notification"), Toast.LENGTH_LONG).show();
             }
         });
@@ -522,22 +568,34 @@ public class NotificationServerService extends Service {
         box.setPadding(dp(22), dp(16), dp(22), dp(18));
         box.setBackgroundColor(parseColor(payload.optString("backgroundColor", "#E6000000"), Color.argb(230, 0, 0, 0)));
 
-        String imageUrl = notificationImageUrl(payload);
-        if (imageUrl.length() > 0) {
-            ImageView imageView = new ImageView(this);
-            imageView.setAdjustViewBounds(true);
-            imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            int imageWidth = Math.max(120, payload.optInt("imagewidth", payload.optInt("imageWidth", 0)));
-            JSONObject image = notificationImage(payload);
-            if (image != null) {
-                imageWidth = Math.max(120, image.optInt("width", imageWidth));
+        String videoUrl = notificationVideoUrl(payload);
+        if (videoUrl.length() > 0) {
+            PlayerView playerView = new PlayerView(this);
+            playerView.setUseController(false);
+            playerView.setKeepContentOnPlayerReset(true);
+            playerView.setShutterBackgroundColor(Color.BLACK);
+            playerView.setResizeMode(notificationVideoFit(payload)
+                    ? AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    : AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
+            LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    notificationVideoHeight(payload));
+            videoParams.setMargins(0, 0, 0, titleOrMessagePresent(payload) ? dp(14) : 0);
+            box.addView(playerView, videoParams);
+            startVideoIntoView(videoUrl, payload, playerView);
+        } else {
+            String imageUrl = notificationImageUrl(payload);
+            if (imageUrl.length() > 0) {
+                ImageView imageView = new ImageView(this);
+                imageView.setAdjustViewBounds(true);
+                imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                imageParams.setMargins(0, 0, 0, titleOrMessagePresent(payload) ? dp(14) : 0);
+                box.addView(imageView, imageParams);
+                loadImageIntoView(imageUrl, imageView);
             }
-            int maxWidth = getResources().getDisplayMetrics().widthPixels - dp(120);
-            int viewWidth = imageWidth > 0 ? Math.min(imageWidth, maxWidth) : Math.min(dp(800), maxWidth);
-            LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(viewWidth, LinearLayout.LayoutParams.WRAP_CONTENT);
-            imageParams.setMargins(0, 0, 0, titleOrMessagePresent(payload) ? dp(14) : 0);
-            box.addView(imageView, imageParams);
-            loadImageIntoView(imageUrl, imageView);
         }
 
         String title = payload.optString("title", "");
@@ -575,6 +633,14 @@ public class NotificationServerService extends Service {
         return media.optJSONObject("image");
     }
 
+    private JSONObject notificationVideo(JSONObject payload) {
+        JSONObject media = payload.optJSONObject("media");
+        if (media == null) {
+            return null;
+        }
+        return media.optJSONObject("video");
+    }
+
     private String notificationImageUrl(JSONObject payload) {
         String directUrl = payload.optString("imageurl", payload.optString("imageUrl", ""));
         if (directUrl.length() > 0) {
@@ -582,6 +648,96 @@ public class NotificationServerService extends Service {
         }
         JSONObject image = notificationImage(payload);
         return image == null ? "" : image.optString("uri", image.optString("url", ""));
+    }
+
+    private int notificationImageWidth(JSONObject payload) {
+        int width = payload.optInt("imagewidth", payload.optInt("imageWidth", 0));
+        JSONObject image = notificationImage(payload);
+        return image == null ? width : image.optInt("width", width);
+    }
+
+    private String notificationVideoUrl(JSONObject payload) {
+        String directUrl = payload.optString("videourl", payload.optString("videoUrl", ""));
+        if (directUrl.length() > 0) {
+            return directUrl;
+        }
+        JSONObject video = notificationVideo(payload);
+        return video == null ? "" : video.optString("uri", video.optString("url", ""));
+    }
+
+    private int notificationVideoWidth(JSONObject payload) {
+        int width = payload.optInt("videowidth", payload.optInt("videoWidth", 0));
+        JSONObject video = notificationVideo(payload);
+        return video == null ? width : video.optInt("width", width);
+    }
+
+    private int notificationVideoHeight(JSONObject payload) {
+        JSONObject video = notificationVideo(payload);
+        int explicitHeight = payload.optInt("videoheight", payload.optInt("videoHeight", 0));
+        if (video != null) {
+            explicitHeight = video.optInt("height", explicitHeight);
+        }
+        if (explicitHeight > 0) {
+            return explicitHeight;
+        }
+        float aspectRatio = 16f / 9f;
+        String ratio = video == null ? "" : video.optString("aspectRatio", "");
+        String[] ratioParts = ratio.split(":");
+        if (ratioParts.length == 2) {
+            try {
+                float width = Float.parseFloat(ratioParts[0]);
+                float height = Float.parseFloat(ratioParts[1]);
+                if (width > 0 && height > 0) {
+                    aspectRatio = width / height;
+                }
+            } catch (NumberFormatException ignored) {
+                // Use 16:9 for malformed aspect ratios.
+            }
+        }
+        return Math.max(dp(120), Math.round(notificationContentWidth(payload) / aspectRatio));
+    }
+
+    private boolean notificationVideoFit(JSONObject payload) {
+        JSONObject video = notificationVideo(payload);
+        String resizeMode = video == null ? "zoom" : video.optString("resizeMode", video.optString("contentMode", "zoom"));
+        return "fit".equalsIgnoreCase(resizeMode) || "contain".equalsIgnoreCase(resizeMode);
+    }
+
+    private boolean notificationVideoMuted(JSONObject payload) {
+        JSONObject video = notificationVideo(payload);
+        return video == null
+                ? payload.optBoolean("muted", true)
+                : video.optBoolean("muted", payload.optBoolean("muted", true));
+    }
+
+    private void startVideoIntoView(String videoUrl, JSONObject payload, PlayerView playerView) {
+        releaseVideoPlayer();
+        DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                .setBufferDurationsMs(500, 3_000, 250, 500)
+                .build();
+        ExoPlayer player = new ExoPlayer.Builder(this)
+                .setLoadControl(loadControl)
+                .build();
+        currentVideoPlayer = player;
+        playerView.setPlayer(player);
+        player.setVolume(notificationVideoMuted(payload) ? 0f : 1f);
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                Log.w(TAG, "Notification video failed", error);
+            }
+        });
+
+        WebSocketFmp4DataSource.Factory dataSourceFactory =
+                new WebSocketFmp4DataSource.Factory(cameraHttpClient);
+        ProgressiveMediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(new MediaItem.Builder()
+                        .setUri(videoUrl)
+                        .setMimeType(MimeTypes.VIDEO_MP4)
+                        .build());
+        player.setMediaSource(mediaSource);
+        player.prepare();
+        player.play();
     }
 
     private void loadImageIntoView(String imageUrl, ImageView imageView) {
@@ -612,7 +768,7 @@ public class NotificationServerService extends Service {
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                Math.min(dp(payload.optInt("widthDp", 520)), getResources().getDisplayMetrics().widthPixels - dp(80)),
+                notificationOverlayWidth(payload),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -623,6 +779,21 @@ public class NotificationServerService extends Service {
         params.x = dp(payload.optInt("xOffsetDp", 36));
         params.y = dp(payload.optInt("yOffsetDp", 36));
         return params;
+    }
+
+    private int notificationOverlayWidth(JSONObject payload) {
+        int overlayWidth = dp(payload.optInt("widthDp", 520));
+        if (!payload.has("widthDp")) {
+            int mediaWidth = Math.max(notificationVideoWidth(payload), notificationImageWidth(payload));
+            if (mediaWidth > 0) {
+                overlayWidth = mediaWidth + dp(44);
+            }
+        }
+        return Math.min(overlayWidth, getResources().getDisplayMetrics().widthPixels - dp(80));
+    }
+
+    private int notificationContentWidth(JSONObject payload) {
+        return Math.max(dp(120), notificationOverlayWidth(payload) - dp(44));
     }
 
     private int gravityForPosition(int position) {
@@ -639,6 +810,8 @@ public class NotificationServerService extends Service {
     }
 
     private void hideOverlay() {
+        handler.removeCallbacks(hideOverlayRunnable);
+        releaseVideoPlayer();
         if (currentOverlay != null && windowManager != null) {
             try {
                 windowManager.removeView(currentOverlay);
@@ -647,6 +820,14 @@ public class NotificationServerService extends Service {
             }
         }
         currentOverlay = null;
+    }
+
+    private void releaseVideoPlayer() {
+        if (currentVideoPlayer != null) {
+            currentVideoPlayer.stop();
+            currentVideoPlayer.release();
+            currentVideoPlayer = null;
+        }
     }
 
     private boolean canDrawOverlays() {

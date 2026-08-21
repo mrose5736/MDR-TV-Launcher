@@ -885,9 +885,68 @@ public class MainActivity extends Activity {
             markActiveInput(item.id);
             startActivity(intent);
         } catch (ActivityNotFoundException error) {
-            clearActiveInput();
-            Toast.makeText(this, "This projector does not expose a standard input switcher.", Toast.LENGTH_LONG).show();
+            if (!launchInputFallback(item, label)) {
+                clearActiveInput();
+                Toast.makeText(this, "This projector does not expose a standard input switcher.", Toast.LENGTH_LONG).show();
+            }
         }
+    }
+
+    private boolean launchInputFallback(InputItem item, String label) {
+        JSONObject inputConfig = inputConfigForItem(item);
+        String fallbackIntentAction = inputConfig == null ? "" : inputConfig.optString("fallbackIntentAction", inputConfig.optString("inputFallbackIntentAction", ""));
+        String fallbackAction = inputConfig == null ? "" : inputConfig.optString("fallbackAction", inputConfig.optString("inputFallbackAction", ""));
+        if (fallbackIntentAction.trim().length() > 0) {
+            Intent fallbackIntent = new Intent(fallbackIntentAction.trim());
+            fallbackIntent.putExtra("inputId", item.id);
+            fallbackIntent.putExtra(Intent.EXTRA_TITLE, label);
+            fallbackIntent.putExtra("android.media.tv.extra.INPUT_NAME", label);
+            markActiveInput(item.id);
+            return openFirstAvailable(fallbackIntent);
+        }
+        if ("inputSettings".equals(fallbackAction) || "inputs".equals(fallbackAction) || "inputChooser".equals(fallbackAction) || "viewInputs".equals(fallbackAction)) {
+            markActiveInput(item.id);
+            return openInputChooser();
+        }
+        if (Build.MANUFACTURER != null && Build.MANUFACTURER.toLowerCase(Locale.UK).contains("xgimi")) {
+            markActiveInput(item.id);
+            return openInputChooser();
+        }
+        return false;
+    }
+
+    private JSONObject inputConfigForItem(InputItem item) {
+        JSONObject inputs = serverConfig.optJSONObject("inputs");
+        if (inputs == null || item == null) {
+            return null;
+        }
+        String safeKey = serverInputKey(item.id);
+        JSONObject inputConfig = inputs.optJSONObject(safeKey);
+        if (inputConfig != null) {
+            return inputConfig;
+        }
+        inputConfig = inputs.optJSONObject(item.id);
+        if (inputConfig != null) {
+            return inputConfig;
+        }
+        JSONArray keys = inputs.names();
+        if (keys == null) {
+            return null;
+        }
+        for (int i = 0; i < keys.length(); i++) {
+            String key = keys.optString(i, "");
+            inputConfig = inputs.optJSONObject(key);
+            if (inputConfig != null && item.id.equals(inputConfig.optString("inputId", ""))) {
+                return inputConfig;
+            }
+        }
+        return null;
+    }
+
+    private String serverInputKey(String inputId) {
+        String encoded = Base64.encodeToString(inputId.getBytes(StandardCharsets.UTF_8),
+                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+        return "input_" + encoded;
     }
 
     private void markActiveInput(String inputId) {
@@ -922,6 +981,14 @@ public class MainActivity extends Activity {
                 new Intent(Settings.ACTION_SETTINGS));
     }
 
+    private boolean openInputChooser() {
+        return openFirstAvailable(
+                new Intent("com.android.tv.action.VIEW_INPUTS"),
+                new Intent("android.settings.TV_INPUT_SETTINGS"),
+                new Intent("android.settings.INPUT_SETTINGS"),
+                new Intent(Settings.ACTION_SETTINGS));
+    }
+
     private void openNetworkSettings() {
         openFirstAvailable(
                 new Intent(Settings.ACTION_WIFI_SETTINGS),
@@ -939,17 +1006,18 @@ public class MainActivity extends Activity {
                 new Intent(Settings.ACTION_SETTINGS));
     }
 
-    private void openFirstAvailable(Intent... intents) {
+    private boolean openFirstAvailable(Intent... intents) {
         for (Intent intent : intents) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 startActivity(intent);
-                return;
+                return true;
             } catch (ActivityNotFoundException ignored) {
                 // Try the next settings surface exposed by this device.
             }
         }
         Toast.makeText(this, "Settings are not available on this device.", Toast.LENGTH_LONG).show();
+        return false;
     }
 
     private void showInputActions(InputItem item) {

@@ -4,3 +4,4 @@
 tvLauncherBaseUrl=https://example.com/Brain
 tvLauncherAdminService=example.tvlauncher.admin
 tvLauncherUnlockService=example.tvlauncher.unlock
+android.useAndroidX=true

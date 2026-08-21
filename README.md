@@ -50,7 +50,8 @@ Supported JSON shape:
       "hidden": false,
       "order": 10,
       "icon": "tv",
-      "iconImageUrl": "https://example.local/icons/sky.png"
+      "iconImageUrl": "https://example.local/icons/sky.png",
+      "fallbackIntentAction": "com.android.tv.action.VIEW_INPUTS"
     }
   },
   "projectorMenu": [
@@ -156,6 +157,7 @@ Input icon options:
 - `icon`: preset name. Current presets are `tv`, `hdmi`, `camera`, `game`, and `app`.
 - `iconImageUrl`: custom PNG/JPG/WebP image URL. This takes priority over the preset.
 - `order`: lower numbers appear first. Inputs with `order` appear before inputs without `order`; unordered inputs then stay in the TV's detected order.
+- `fallbackIntentAction`: optional action to open when the standard Android passthrough input launch is not supported by the device. XGIMI projectors can use `com.android.tv.action.VIEW_INPUTS` to open the projector's source chooser.
 
 When an input is launched, the launcher sends the custom `label` as the intent title and shows it briefly as an overlay toast. The vendor Live TV/input app may still show its own built-in HDMI name because Android does not expose a standard way for a launcher app to rename the TV firmware's input overlay.
 
@@ -200,8 +202,9 @@ Notification server:
 - `GET /status` returns a JSON status payload.
 - `GET /config` and `GET /options` return the TV status, last server config, detected inputs, remote-control config, notification config, supported endpoints, and common keycode options.
 - `GET /inputs` returns just the detected TV input IDs and labels.
-- `POST /notify` accepts JSON with `title`, `message`, `duration`, `position`, `backgroundColor`, `titleColor`, `titleSize`, `messageColor`, `messageSize`, and PiPup-style `media.image.uri` / `media.image.width`.
+- `POST /notify` accepts JSON with `title`, `message`, `duration`, `position`, `backgroundColor`, `titleColor`, `titleSize`, `messageColor`, `messageSize`, PiPup-style `media.image.uri` / `media.image.width`, and live fMP4 WebSocket video through `media.video.uri`.
 - Direct `imageurl` / `imagewidth` fields are also accepted.
+- Video fields include `uri`, `width`, `height`, `aspectRatio` (default `16:9`), `muted` (default `true`), and `resizeMode` (`zoom` or `fit`). Direct `videourl` / `videowidth` / `videoheight` fields are also accepted.
 - `POST /input` with `{ "inputId": "..." }` opens a connected TV input by Android input ID.
 - `GET /input/{url-encoded-input-id}` also opens an input.
 - `POST /key` with `{ "keyCode": "KEYCODE_BACK" }` or `{ "keyCode": 4 }` sends an Android keycode.
@@ -234,6 +237,25 @@ curl -X POST http://TV_IP:7980/notify \
     "media":{"image":{"uri":"https://example.local/snapshot.jpg","width":800}}
   }'
 ```
+
+Live UniFi-style fMP4 WebSocket example:
+
+```sh
+curl -X POST http://TV_IP:7980/notify \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "duration":45,
+    "title":"Front door",
+    "media":{"video":{
+      "uri":"wss://cctv.example.com/api/2.0/ws/camera/CAMERA_ID/live?TDSAuthorization=SHORT_LIVED_TOKEN",
+      "aspectRatio":"16:9",
+      "muted":true,
+      "resizeMode":"zoom"
+    }}
+  }'
+```
+
+Use a short-lived camera URL or token because the TV-local notification endpoint uses HTTP on the LAN.
 
 Input and key examples:
 

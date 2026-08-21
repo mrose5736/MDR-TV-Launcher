@@ -258,6 +258,8 @@ POST http://{tvIp}:7980/action
 GET http://{tvIp}:7980/sleep
 ```
 
+`POST /notify` supports static images through `media.image.uri` and live H.264/AAC fragmented-MP4 WebSocket streams through `media.video.uri`. Video options are `width`, `height`, `aspectRatio`, `muted`, and `resizeMode` (`zoom` or `fit`).
+
 `/config` and `/options` return the TV status, cached server config, detected input IDs/labels, remote-control mapping, notification settings, supported local endpoints, and common keycode options. `/inputs` returns only the input list.
 
 Input selection accepts:
