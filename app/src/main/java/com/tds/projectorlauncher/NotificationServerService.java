@@ -17,6 +17,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
@@ -30,7 +31,10 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
@@ -47,6 +51,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 import okhttp3.OkHttpClient;
@@ -570,7 +576,8 @@ public class NotificationServerService extends Service {
 
         String videoUrl = notificationVideoUrl(payload);
         if (videoUrl.length() > 0) {
-            PlayerView playerView = new PlayerView(this);
+            PlayerView playerView = (PlayerView) LayoutInflater.from(this)
+                    .inflate(R.layout.notification_video, box, false);
             playerView.setUseController(false);
             playerView.setKeepContentOnPlayerReset(true);
             playerView.setShutterBackgroundColor(Color.BLACK);
@@ -715,7 +722,10 @@ public class NotificationServerService extends Service {
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(500, 3_000, 250, 500)
                 .build();
-        ExoPlayer player = new ExoPlayer.Builder(this)
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
+                .setMediaCodecSelector(softwareVideoCodecSelector())
+                .setEnableDecoderFallback(true);
+        ExoPlayer player = new ExoPlayer.Builder(this, renderersFactory)
                 .setLoadControl(loadControl)
                 .build();
         currentVideoPlayer = player;
@@ -738,6 +748,35 @@ public class NotificationServerService extends Service {
         player.setMediaSource(mediaSource);
         player.prepare();
         player.play();
+    }
+
+    private MediaCodecSelector softwareVideoCodecSelector() {
+        return (mimeType, requiresSecureDecoder, requiresTunnelingDecoder) -> {
+            List<MediaCodecInfo> available = MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType,
+                    requiresSecureDecoder,
+                    requiresTunnelingDecoder);
+            if (mimeType == null || !mimeType.startsWith("video/")) {
+                return available;
+            }
+
+            List<MediaCodecInfo> software = new ArrayList<>();
+            for (MediaCodecInfo decoder : available) {
+                String name = decoder.name == null ? "" : decoder.name.toLowerCase(Locale.UK);
+                if (name.startsWith("c2.android.")
+                        || name.startsWith("omx.google.")
+                        || name.contains(".software.")
+                        || name.contains(".sw.")) {
+                    software.add(decoder);
+                }
+            }
+            if (software.isEmpty()) {
+                Log.w(TAG, "No software video decoder found; using the platform decoder list");
+                return available;
+            }
+            Log.i(TAG, "Using software notification video decoder " + software.get(0).name);
+            return software;
+        };
     }
 
     private void loadImageIntoView(String imageUrl, ImageView imageView) {
