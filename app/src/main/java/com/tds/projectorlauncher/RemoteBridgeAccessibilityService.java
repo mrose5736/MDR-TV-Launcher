@@ -2,9 +2,15 @@ package com.tds.projectorlauncher;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
+import android.util.SparseArray;
+import android.util.SparseLongArray;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
@@ -22,7 +28,16 @@ import java.util.Locale;
 public class RemoteBridgeAccessibilityService extends AccessibilityService {
     private static final String PREFS_NAME = "projector_launcher";
     private static final String TAG = "TDSRemoteBridge";
+    private static final long DEFAULT_LONG_PRESS_MS = 650L;
+    private static final long MIN_LONG_PRESS_MS = 200L;
+    private static final long MAX_LONG_PRESS_MS = 5000L;
+    private static final int TCL_NUMBER_KEYCODE = 4056;
+    private static final long SEND_ON_DOWN_DEBOUNCE_MS = 350L;
     private static volatile RemoteBridgeAccessibilityService activeService;
+    private final Handler keyHandler = new Handler(Looper.getMainLooper());
+    private final SparseArray<PendingKeyPress> pendingKeyPresses = new SparseArray<>();
+    private final SparseLongArray lastDownActionTimes = new SparseLongArray();
+    private final RemoteKeySequenceRouter keySequenceRouter = new RemoteKeySequenceRouter();
 
     @Override
     protected void onServiceConnected() {
@@ -36,6 +51,8 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        cancelPendingKeyPresses();
+        keySequenceRouter.clear();
         if (activeService == this) {
             activeService = null;
         }
@@ -109,7 +126,27 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
+        PendingKeyPress pending = pendingKeyPresses.get(event.getKeyCode());
+        if (event.getAction() == KeyEvent.ACTION_UP && pending != null) {
+            // Also finish commands explicitly configured with consume:false.
+            // Their release still passes through, but their short/long-press
+            // bookkeeping must complete exactly once.
+            boolean consumed = finishKeyPress(pending, event.isCanceled());
+            return keySequenceRouter.route(event.getDeviceId(), event.getKeyCode(),
+                    false, true, event.getRepeatCount(), () -> consumed);
+        }
+        return keySequenceRouter.route(event.getDeviceId(), event.getKeyCode(),
+                event.getAction() == KeyEvent.ACTION_DOWN,
+                event.getAction() == KeyEvent.ACTION_UP, event.getRepeatCount(),
+                () -> handleRemoteKeyEvent(event));
+    }
+
+    private boolean handleRemoteKeyEvent(KeyEvent event) {
         try {
+            if (NotificationServerService.isControlPanelVisible()) {
+                return false;
+            }
+
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             JSONObject remote = new JSONObject(preferences.getString(MainActivity.PREF_REMOTE_CONFIG, "{}"));
             if (!remote.optBoolean("enabled", false)) {
@@ -121,32 +158,149 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
             boolean inputActive = activeInputId != null
                     && activeInputId.length() > 0
                     && activeUntil > System.currentTimeMillis() / 1000L;
-            boolean onlyWhenInputActive = remote.optBoolean("onlyWhenInputActive", true);
-            if (onlyWhenInputActive && !inputActive) {
-                return false;
-            }
 
-            JSONObject action = actionForKey(remote.optJSONObject("keys"), event.getKeyCode());
+            JSONObject action = actionForActiveInput(remote, activeInputId, event.getKeyCode());
             if (action == null) {
                 return false;
             }
+
+            boolean onlyWhenInputActive = remote.optBoolean("onlyWhenInputActive", true);
+            boolean alwaysActive = action.optBoolean("alwaysActive", false);
+            if (onlyWhenInputActive && !inputActive && !alwaysActive) {
+                return false;
+            }
+
             String requiredInputId = action.optString("inputId", "");
             if (requiredInputId.length() > 0 && !requiredInputId.equals(activeInputId)) {
                 return false;
             }
 
-            boolean consume = inputActive && action.optBoolean("consume", true);
+            boolean consume = (inputActive || alwaysActive) && action.optBoolean("consume", true);
             Log.d(TAG, "key=" + event.getKeyCode()
                     + " name=" + KeyEvent.keyCodeToString(event.getKeyCode())
                     + " action=" + event.getAction()
+                    + " repeat=" + event.getRepeatCount()
                     + " inputActive=" + inputActive
+                    + " alwaysActive=" + alwaysActive
                     + " consume=" + consume);
+
+            boolean sendOnDown = action.optBoolean("sendOnDown", event.getKeyCode() == TCL_NUMBER_KEYCODE);
+            if (sendOnDown) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    long now = SystemClock.elapsedRealtime();
+                    long previous = lastDownActionTimes.get(event.getKeyCode(), 0L);
+                    if (now - previous >= SEND_ON_DOWN_DEBOUNCE_MS) {
+                        lastDownActionTimes.put(event.getKeyCode(), now);
+                        sendRequest(action);
+                    }
+                }
+                return consume;
+            }
+
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    beginKeyPress(event.getKeyCode(), action, remote, consume);
+                }
+                return consume;
+            }
             if (event.getAction() == KeyEvent.ACTION_UP) {
                 sendRequest(action);
             }
             return consume;
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private void beginKeyPress(int keyCode, JSONObject shortAction, JSONObject remote, boolean consume) {
+        PendingKeyPress previous = pendingKeyPresses.get(keyCode);
+        if (previous != null) {
+            keyHandler.removeCallbacks(previous.longPressRunnable);
+            pendingKeyPresses.remove(keyCode);
+        }
+
+        JSONObject longAction = mergedLongPressAction(shortAction);
+        PendingKeyPress pending = new PendingKeyPress(keyCode, shortAction, longAction, consume);
+        pendingKeyPresses.put(keyCode, pending);
+        if (longAction == null) {
+            return;
+        }
+
+        long threshold = shortAction.optLong(
+                "longPressMs",
+                remote.optLong("longPressMs", DEFAULT_LONG_PRESS_MS)
+        );
+        threshold = Math.max(MIN_LONG_PRESS_MS, Math.min(MAX_LONG_PRESS_MS, threshold));
+        keyHandler.postDelayed(pending.longPressRunnable, threshold);
+    }
+
+    private boolean finishKeyPress(PendingKeyPress pending, boolean canceled) {
+        keyHandler.removeCallbacks(pending.longPressRunnable);
+        pendingKeyPresses.remove(pending.keyCode);
+        if (!canceled && !pending.longPressSent) {
+            sendRequest(pending.shortAction);
+        }
+        return pending.consume;
+    }
+
+    private JSONObject mergedLongPressAction(JSONObject shortAction) {
+        JSONObject configured = shortAction.optJSONObject("longPress");
+        if (configured == null) {
+            return null;
+        }
+        try {
+            JSONObject merged = new JSONObject(shortAction.toString());
+            merged.remove("longPress");
+            if (configured.has("requestUrl") && !configured.has("url")) {
+                merged.remove("url");
+            }
+            if (configured.has("requestMethod") && !configured.has("method")) {
+                merged.remove("method");
+            }
+            if (configured.has("requestBody") && !configured.has("body")) {
+                merged.remove("body");
+            }
+            Iterator<String> names = configured.keys();
+            while (names.hasNext()) {
+                String name = names.next();
+                merged.put(name, configured.get(name));
+            }
+            String rawUrl = merged.optString("url", merged.optString("requestUrl", "")).trim();
+            return rawUrl.length() == 0 ? null : merged;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void cancelPendingKeyPresses() {
+        for (int i = 0; i < pendingKeyPresses.size(); i++) {
+            keyHandler.removeCallbacks(pendingKeyPresses.valueAt(i).longPressRunnable);
+        }
+        pendingKeyPresses.clear();
+    }
+
+    private final class PendingKeyPress {
+        final int keyCode;
+        final JSONObject shortAction;
+        final JSONObject longAction;
+        final boolean consume;
+        boolean longPressSent;
+        final Runnable longPressRunnable;
+
+        PendingKeyPress(int keyCode, JSONObject shortAction, JSONObject longAction, boolean consume) {
+            this.keyCode = keyCode;
+            this.shortAction = shortAction;
+            this.longAction = longAction;
+            this.consume = consume;
+            this.longPressRunnable = () -> {
+                if (pendingKeyPresses.get(this.keyCode) != this || this.longAction == null) {
+                    return;
+                }
+                this.longPressSent = true;
+                Log.d(TAG, "long press key=" + this.keyCode
+                        + " name=" + KeyEvent.keyCodeToString(this.keyCode));
+                sendRequest(this.longAction);
+            };
         }
     }
 
@@ -173,6 +327,51 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
         return null;
     }
 
+    private JSONObject actionForActiveInput(JSONObject remote, String activeInputId, int keyCode) {
+        JSONObject inputKeys = inputKeysForActiveInput(remote, activeInputId);
+        JSONObject action = actionForKey(inputKeys, keyCode);
+        return action != null ? action : actionForKey(remote.optJSONObject("keys"), keyCode);
+    }
+
+    private JSONObject inputKeysForActiveInput(JSONObject remote, String activeInputId) {
+        if (activeInputId == null || activeInputId.length() == 0) {
+            return null;
+        }
+        JSONObject scopedInputs = remote.optJSONObject("inputs");
+        if (scopedInputs == null) {
+            return null;
+        }
+
+        JSONObject direct = scopedInputs.optJSONObject(activeInputId);
+        if (direct != null) {
+            return direct.optJSONObject("keys") != null ? direct.optJSONObject("keys") : direct;
+        }
+
+        try {
+            SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            JSONObject server = new JSONObject(preferences.getString(MainActivity.PREF_SERVER_CONFIG, "{}"));
+            JSONObject configuredInputs = server.optJSONObject("inputs");
+            if (configuredInputs == null) {
+                return null;
+            }
+            Iterator<String> names = configuredInputs.keys();
+            while (names.hasNext()) {
+                String inputKey = names.next();
+                JSONObject input = configuredInputs.optJSONObject(inputKey);
+                if (input == null || !activeInputId.equals(input.optString("inputId", inputKey))) {
+                    continue;
+                }
+                JSONObject scoped = scopedInputs.optJSONObject(inputKey);
+                if (scoped != null) {
+                    return scoped.optJSONObject("keys") != null ? scoped.optJSONObject("keys") : scoped;
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall back to the global key map.
+        }
+        return null;
+    }
+
     private int keyCodeForName(String name) {
         if (name == null) {
             return KeyEvent.KEYCODE_UNKNOWN;
@@ -191,6 +390,9 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
 
     private void sendRequest(JSONObject action) {
         String rawUrl = action.optString("url", action.optString("requestUrl", ""));
+        if (sendLocalLauncherAction(rawUrl)) {
+            return;
+        }
         String url = resolveConfiguredUrl(rawUrl);
         if (url.length() == 0) {
             return;
@@ -209,10 +411,41 @@ public class RemoteBridgeAccessibilityService extends AccessibilityService {
                 } else {
                     httpPost(url, requestBody == null ? "{}" : String.valueOf(requestBody));
                 }
-            } catch (Exception ignored) {
+            } catch (Exception error) {
+                Log.w(TAG, "Remote key request failed: " + url, error);
                 // Remote bridge key actions should never break normal remote handling.
             }
         }).start();
+    }
+
+    private boolean sendLocalLauncherAction(String rawUrl) {
+        if (rawUrl == null) {
+            return false;
+        }
+        String url = rawUrl.trim().toLowerCase(Locale.UK);
+        String action = null;
+        if ("/panel".equals(url)
+                || "tds://panel".equals(url)
+                || "http://127.0.0.1:7980/panel".equals(url)
+                || "http://localhost:7980/panel".equals(url)) {
+            action = NotificationServerService.ACTION_SHOW_PANEL;
+        } else if ("/panel/hide".equals(url)
+                || "tds://panel/hide".equals(url)
+                || "http://127.0.0.1:7980/panel/hide".equals(url)
+                || "http://localhost:7980/panel/hide".equals(url)) {
+            action = NotificationServerService.ACTION_HIDE_PANEL;
+        }
+        if (action == null) {
+            return false;
+        }
+        try {
+            Intent intent = new Intent(this, NotificationServerService.class);
+            intent.setAction(action);
+            startService(intent);
+        } catch (Exception error) {
+            Log.w(TAG, "Local launcher action failed: " + action, error);
+        }
+        return true;
     }
 
     private String resolveConfiguredUrl(String rawUrl) {

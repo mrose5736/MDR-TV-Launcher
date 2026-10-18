@@ -156,6 +156,9 @@ Example config:
   "name": "Kitchen TV",
   "subtitle": "Use the remote to choose an input",
   "room": "Kitchen",
+  "uiVersion": 2,
+  "webAppUrl": "/tvlauncher/v2/",
+  "webAppRevision": "2026-10-18.1",
   "launcherVersion": "0.2.2",
   "inputs": {
     "input_safeBase64InputId": {
@@ -191,19 +194,44 @@ Example config:
       "requestBeforeInput": true
     }
   ],
+  "deviceCommands": [
+    {
+      "id": "projector",
+      "label": "Projector",
+      "icon": "tv",
+      "order": 10,
+      "action": "projectorSettings"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "lock",
+      "order": 20,
+      "url": "/api/tvlauncher/example-tv-id/local/action/sleep",
+      "method": "GET"
+    }
+  ],
+  "update": {
+    "versionCode": 6,
+    "versionName": "0.3.0",
+    "apkUrl": "https://example.com/projector-launcher-0.3.0.apk",
+    "sha256": "optional-release-sha256",
+    "required": false,
+    "channel": "stable"
+  },
   "remoteControl": {
     "enabled": true,
     "onlyWhenInputActive": true,
+    "longPressMs": 650,
     "keys": {
-      "KEYCODE_CHANNEL_UP": {
-        "url": "https://example.com/api/skyq/channel-up",
+      "KEYCODE_DPAD_LEFT": {
+        "url": "https://example.com/api/skyq/remote/left",
         "method": "POST",
-        "consume": true
-      },
-      "KEYCODE_CHANNEL_DOWN": {
-        "url": "https://example.com/api/skyq/channel-down",
-        "method": "POST",
-        "consume": true
+        "consume": true,
+        "longPress": {
+          "url": "https://example.com/api/skyq/remote/rewind",
+          "method": "POST"
+        }
       }
     }
   },
@@ -237,12 +265,36 @@ Example config:
     "notificationStatusUrl": "http://192.168.1.50:7980/status",
     "notificationServerEnabled": true,
     "launcherVersion": "0.2.2",
+    "launcherVersionCode": 5,
+    "uiVersion": 2,
     "manufacturer": "Example",
     "model": "Android TV",
     "lastSeen": 1783636370
   }
 }
 ```
+
+`uiVersion` is deliberately opt-in. Missing values and `1` use the original home screen; `2` enables V2. When `webAppUrl` is present, the native shell loads the hosted interface and falls back to the native V2 renderer if its main page fails. V2 reads `deviceCommands` from the top level or `settings`, falling back to `projectorMenu` when no dedicated commands are supplied.
+
+The native shell appends `tvId`, `nativeVersion`, and `nativeBridge=1` query parameters to `webAppUrl`. It injects each successfully polled configuration through `window.tvLauncherApplyConfig(json)`, allowing the static web app to be hosted on a separate HTTPS origin without enabling cross-origin API access. The page invokes native capabilities only through these URLs:
+
+- `tvlauncher://input?id={androidInputId}`
+- `tvlauncher://quick?id={quickSelectId}`
+- `tvlauncher://command?id={deviceCommandId}`
+- `tvlauncher://admin`
+- `tvlauncher://refresh`
+
+The shell rejects top-level navigation outside the configured `webAppUrl` origin and does not expose an unrestricted JavaScript interface.
+
+Increment `webAppRevision` whenever hosted assets change. The page compares it on each configuration poll and reloads itself when the value changes.
+
+Each device command supports `id`, `label`, `icon`, `iconImageUrl`, `order`, and `hidden`, plus one execution mechanism:
+
+- `action`: `projectorSettings`, `inputSettings`, `tvSettings`, `refreshConfig`, `update`, `lock`, or `controlPanel`
+- `intentAction`: an Android intent action exposed by the TV firmware
+- `url` / `requestUrl`, `method` / `requestMethod`, and optional `body` / `requestBody`
+
+The `update` object is the fleet-friendly replacement for a bare `settings.updateApkUrl`. `versionCode` is used for comparisons, `versionName` is presented to administrators, and `required` flags a mandatory release without bypassing Android's installer confirmation. The legacy URL remains supported.
 
 The launcher also exposes a local TV API on `deviceStatus.notificationStatusUrl`'s host/port:
 

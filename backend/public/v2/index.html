@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'">
+    <title>TV Launcher</title>
+    <link rel="stylesheet" href="./styles.css?v=20261018.5">
+  </head>
+  <body>
+    <main class="launcher">
+      <header class="topbar">
+        <div class="identity">
+          <h1 id="tv-name">TV</h1>
+          <p id="tv-subtitle"></p>
+        </div>
+        <div class="time-block">
+          <a class="clock focusable" id="clock" tabindex="-1" data-focus-id="admin" data-zone="header" href="tvlauncher://admin" aria-label="Open admin">20:42</a>
+          <div id="date"></div>
+        </div>
+      </header>
+
+      <div class="content-grid">
+        <div class="primary-column">
+          <section class="section" id="sources-section">
+            <h2>Watch</h2>
+            <div class="source-grid" id="sources"></div>
+          </section>
+
+          <section class="section quick-section" id="quick-section" hidden>
+            <h2>Quick select</h2>
+            <div class="quick-grid" id="quick-select"></div>
+          </section>
+        </div>
+
+        <aside class="controls-panel" id="controls-panel" hidden>
+          <h2>In this room</h2>
+          <div class="controls-list" id="device-controls"></div>
+        </aside>
+      </div>
+
+      <footer>
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status">Connecting…</span>
+      </footer>
+    </main>
+    <div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
+    <div class="scrim" aria-hidden="true"></div>
+    <script src="./app.js?v=20261018.5" defer></script>
+  </body>
+</html>

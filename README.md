@@ -42,6 +42,9 @@ Supported JSON shape:
   "name": "Kitchen TV",
   "subtitle": "Use the remote to choose an input",
   "room": "Kitchen",
+  "uiVersion": 2,
+  "webAppUrl": "/tvlauncher/v2/",
+  "webAppRevision": "2026-10-18.1",
   "launcherVersion": "0.2.1",
   "inputs": {
     "input_Y29tLnRjbC50dmlucHV0Ly5UdlBhc3NUaHJvdWdoU2VydmljZS9IVzE2": {
@@ -85,19 +88,51 @@ Supported JSON shape:
       "requestBeforeInput": true
     }
   ],
+  "deviceCommands": [
+    {
+      "id": "projector-settings",
+      "label": "Projector",
+      "icon": "tv",
+      "order": 10,
+      "action": "projectorSettings"
+    },
+    {
+      "id": "picture-settings",
+      "label": "Picture",
+      "icon": "app",
+      "order": 20,
+      "intentAction": "android.settings.DISPLAY_SETTINGS"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "lock",
+      "order": 30,
+      "url": "/api/tvlauncher/TV_ID/local/action/sleep",
+      "method": "GET"
+    }
+  ],
+  "update": {
+    "versionCode": 6,
+    "versionName": "0.3.0",
+    "apkUrl": "https://example.local/projector-launcher-0.3.0.apk",
+    "sha256": "optional-release-sha256",
+    "required": false,
+    "channel": "stable"
+  },
   "remoteControl": {
     "enabled": true,
     "onlyWhenInputActive": true,
+    "longPressMs": 650,
     "keys": {
-      "KEYCODE_CHANNEL_UP": {
-        "url": "https://example.local/api/skyq/channel-up",
+      "KEYCODE_DPAD_LEFT": {
+        "url": "https://example.local/api/skyq/remote/left",
         "method": "POST",
-        "consume": true
-      },
-      "KEYCODE_CHANNEL_DOWN": {
-        "url": "https://example.local/api/skyq/channel-down",
-        "method": "POST",
-        "consume": true
+        "consume": true,
+        "longPress": {
+          "url": "https://example.local/api/skyq/remote/rewind",
+          "method": "POST"
+        }
       }
     }
   },
@@ -128,6 +163,25 @@ Supported JSON shape:
 ```
 
 `name`, `subtitle`, `backgroundImageUrl`, labels, hidden states, projector menu items, lock state, auth requirement, unlock auth requirement, poll interval, screensaver timeout, and update URL are polled from the server. Rename/hide changes made in Admin patch the top-level `inputs` key through `/api/tvlauncher/{tvId}/keys`, so the server remains the source of truth.
+
+UI versions:
+
+- Omit `uiVersion` or set it to `1` to retain the original launcher on existing TVs.
+- Set top-level `uiVersion` (or `settings.uiVersion`) to `2` to enable V2 for an individual TV.
+- Set `webAppUrl` (top-level or under `settings`) to load V2 from the server. Relative paths beginning with `/` resolve against `tvLauncherBaseUrl`.
+- When `webAppUrl` is absent, V2 uses the APK's native V2 renderer. When the hosted page cannot load, the APK falls back to that native renderer automatically.
+- V2 reads its right-hand buttons from `deviceCommands`. If that key is absent, existing `projectorMenu` items are used as a compatibility fallback.
+
+Hosted V2:
+
+- The buildless HTML/CSS/JavaScript app lives in `backend/public/v2` and the example Express server publishes it at `/tvlauncher/v2/`.
+- The native shell supplies `tvId` and its installed version as query parameters, then injects the configuration it already polls from the launcher API. This allows the static UI to live on a separate HTTPS origin without weakening API CORS policy.
+- Static web assets are served with revalidation. Increment `webAppRevision` after publishing HTML/CSS/JavaScript to make each open V2 launcher reload itself on its next config poll.
+- Input selection, quick actions, device commands, and Admin use a restricted `tvlauncher://` navigation bridge. No general JavaScript interface is exposed to the page.
+- The WebView only permits top-level navigation within the configured web-app origin; Android safe browsing and mixed-content blocking remain enabled.
+- Keep lock/auth enforcement, input discovery, notifications, remote-control interception, and offline behavior native. The hosted page should remain a presentation and interaction layer.
+- Optional `roomStateUrl` must be on the hosted page's origin. Return `{"states":{"lights":{"state":"on","active":true,"label":"On"}}}` and bind tiles using `stateKey`. Each installation supplies its own state adapter; private room integrations and deployment configs are not part of this repository.
+- The hosted UI supports `iconType` values `sky`, `apple`, `bulb`, `speaker`, `guide`, `controls`, `f1`, and `tv`, or a custom `iconImageUrl`. Navigation preserves tile focus across state/config polls.
 
 Wallpaper images are cached on the TV after the first successful download. On the next launcher start, the cached image is shown immediately while the launcher polls the server for config and checks whether the image has changed.
 
@@ -180,15 +234,37 @@ Quick select options:
 - `requestBeforeInput` defaults to `true`. Set it to `false` if the input should open before the backend request is sent.
 - Quick-select tiles support `icon`, `iconImageUrl`, and `order`.
 
+Device command options:
+
+- Put V2 command buttons in top-level `deviceCommands` or `settings.deviceCommands`.
+- A command can use a launcher `action`, an Android `intentAction`, or a backend `url` / `requestUrl` with `method` and optional JSON `body`.
+- Built-in actions are `projectorSettings`, `inputSettings`, `tvSettings`, `refreshConfig`, `update`, `lock`, and `controlPanel`.
+- Relative URLs beginning with `/` resolve against `tvLauncherBaseUrl`, so a command can call the existing per-TV local proxy routes.
+- `hidden`, `order`, `icon`, and `iconImageUrl` behave the same way as other server-driven tiles.
+
+Fleet updates:
+
+- Prefer the top-level `update` object over the legacy `settings.updateApkUrl` string. The legacy field remains supported.
+- `versionCode` is the authoritative comparison value; `versionName` is display text. `apkUrl` is opened by the Admin update row.
+- `required` marks a release as mandatory in the UI; it does not bypass Android's package-installer confirmation.
+- `channel` and `sha256` are reserved for server-side rollout selection and verified downloading. See [FLEET_UPDATES.md](FLEET_UPDATES.md) for the recommended staged rollout model.
+- Device status now reports the real Gradle `launcherVersion`, `launcherVersionCode`, and active `uiVersion`, avoiding drift from a hard-coded version string.
+
 Remote bridge options:
 
 - Put remote bridge config in top-level `remoteControl` or `settings.remoteControl`.
 - The user must enable `Projector Launcher Remote Bridge` in Android Accessibility settings on each TV.
 - `enabled` must be `true` before the service sends requests.
 - `onlyWhenInputActive` defaults to `true`; this keeps key interception limited to the period after the launcher opens an input.
+- Set `alwaysActive: true` on an individual key action when that key must work everywhere. It overrides `onlyWhenInputActive` for that key only.
 - `settings.activeInputSeconds` controls how long an opened input is treated as active. Default: `21600` seconds / 6 hours.
 - `keys` maps Android key names or numeric key codes to request actions.
-- `consume` defaults to `true`, but keys are only consumed while an input is marked active. Set `consume: false` to send the backend request while still allowing the TV/input app to receive the key.
+- `inputs` can hold per-input key maps. Use the launcher input object key (or its raw Android `inputId`) and put mappings under `keys`. An active input's mapping wins; missing keys fall back to the global `remoteControl.keys` map.
+- Add a `longPress` request action to a key to send it once when the button is held. Releasing before the threshold sends only the normal key action; releasing after it does not send the normal action again.
+- `longPressMs` sets the remote-wide hold threshold and defaults to `650` milliseconds. A key-level `longPressMs` overrides it. Values are limited to `200`–`5000` milliseconds.
+- Long-press actions accept the same `url` / `requestUrl`, `method` / `requestMethod`, and `body` / `requestBody` fields as normal actions. Missing fields inherit from the normal action.
+- `consume` defaults to `true`. Active-input keys are consumed while an input is marked active; an `alwaysActive` key can be consumed everywhere. Set `consume: false` to send the backend request while still allowing the foreground app to receive the key.
+- The TCL numbers button (vendor keycode `4056`) is sent on key-down because this firmware does not emit its key-up event. Duplicate down events are debounced. Other unusual vendor buttons can opt into the same behaviour with `sendOnDown: true`.
 
 Device status:
 
@@ -203,6 +279,8 @@ Notification server:
 - `GET /config` and `GET /options` return the TV status, last server config, detected inputs, remote-control config, notification config, supported endpoints, and common keycode options.
 - `GET /inputs` returns just the detected TV input IDs and labels.
 - `POST /notify` accepts JSON with `title`, `message`, `duration`, `position`, `backgroundColor`, `titleColor`, `titleSize`, `messageColor`, `messageSize`, PiPup-style `media.image.uri` / `media.image.width`, and live fMP4 WebSocket video through `media.video.uri`.
+- `GET /panel` opens a focusable quick-control panel over the bottom quarter of the current picture. `GET /panel/hide` closes it. Use `/panel`, `http://127.0.0.1:7980/panel`, or `tds://panel` as a remote key's custom URL and set that key to `alwaysActive: true`. These URLs are dispatched internally when used by the remote bridge, avoiding URL rewriting and a cleartext loopback HTTP request.
+- Configure the panel with top-level `controlPanel` or `settings.controlPanel`, using `title`, `duration`, `heightDp`, `backgroundColor`, and a `buttons` array. Each button accepts `label`, `icon`, `url`, `method`, and `body`. An unconfigured panel shows an empty state and sends no device commands. When upgrading from a custom build with built-in buttons, move those buttons into per-TV configuration first.
 - Direct `imageurl` / `imagewidth` fields are also accepted.
 - Video fields include `uri`, `width`, `height`, `aspectRatio` (default `16:9`), `muted` (default `true`), and `resizeMode` (`zoom` or `fit`). Direct `videourl` / `videowidth` / `videoheight` fields are also accepted.
 - `POST /input` with `{ "inputId": "..." }` opens a connected TV input by Android input ID.

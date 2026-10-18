@@ -19,8 +19,8 @@ android {
         applicationId "com.tds.projectorlauncher"
         minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName "0.2.1"
+        versionCode 11
+        versionName "0.3.3"
 
         buildConfigField "String", "TV_LAUNCHER_BASE_URL", "\"${configString("tvLauncherBaseUrl", "https://example.com/Brain")}\""
         buildConfigField "String", "TV_LAUNCHER_ADMIN_SERVICE", "\"${configString("tvLauncherAdminService", "example.tvlauncher.admin")}\""

@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.os.Build;
 import android.os.Handler;
@@ -62,6 +63,9 @@ public class NotificationServerService extends Service {
     private static final String PREFS_NAME = "projector_launcher";
     private static final String TAG = "TDSNotifyServer";
     private static final int NOTIFICATION_PORT = 7980;
+    public static final String ACTION_SHOW_PANEL = "com.tds.projectorlauncher.action.SHOW_PANEL";
+    public static final String ACTION_HIDE_PANEL = "com.tds.projectorlauncher.action.HIDE_PANEL";
+    private static volatile boolean controlPanelVisible = false;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable hideOverlayRunnable = this::hideOverlay;
@@ -79,6 +83,11 @@ public class NotificationServerService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         startServerFromConfig();
+        if (intent != null && ACTION_SHOW_PANEL.equals(intent.getAction())) {
+            showControlPanel();
+        } else if (intent != null && ACTION_HIDE_PANEL.equals(intent.getAction())) {
+            handler.post(this::hideOverlay);
+        }
         return START_STICKY;
     }
 
@@ -199,6 +208,18 @@ public class NotificationServerService extends Service {
                 JSONObject payload = body.length() == 0 ? new JSONObject() : new JSONObject(body);
                 showNotification(payload);
                 writeJson(output, 200, "{\"ok\":true}");
+                return;
+            }
+            if (("POST".equals(method) || "GET".equals(method)) && path.startsWith("/panel")) {
+                if (path.startsWith("/panel/hide")) {
+                    handler.post(this::hideOverlay);
+                } else {
+                    showControlPanel();
+                }
+                JSONObject response = new JSONObject();
+                response.put("ok", true);
+                response.put("action", path.startsWith("/panel/hide") ? "hide" : "show");
+                writeJson(output, 200, response.toString());
                 return;
             }
             if (("POST".equals(method) || "GET".equals(method)) && path.startsWith("/key")) {
@@ -465,6 +486,8 @@ public class NotificationServerService extends Service {
         endpoints.put("GET /options");
         endpoints.put("GET /inputs");
         endpoints.put("POST /notify");
+        endpoints.put("GET /panel");
+        endpoints.put("GET /panel/hide");
         endpoints.put("POST /input");
         endpoints.put("GET /input/{urlEncodedInputId}");
         endpoints.put("POST /key");
@@ -489,6 +512,7 @@ public class NotificationServerService extends Service {
         addKeyOption(keys, KeyEvent.KEYCODE_BACK, "back");
         addKeyOption(keys, KeyEvent.KEYCODE_HOME, "home");
         addKeyOption(keys, KeyEvent.KEYCODE_MENU, "menu");
+        addKeyOption(keys, KeyEvent.KEYCODE_INFO, "info");
         addKeyOption(keys, KeyEvent.KEYCODE_CHANNEL_UP, "channel up");
         addKeyOption(keys, KeyEvent.KEYCODE_CHANNEL_DOWN, "channel down");
         addKeyOption(keys, KeyEvent.KEYCODE_VOLUME_UP, "volume up");
@@ -562,6 +586,358 @@ public class NotificationServerService extends Service {
                 Toast.makeText(this, payload.optString("message", "Notification"), Toast.LENGTH_LONG).show();
             }
         });
+    }
+
+    public static boolean isControlPanelVisible() {
+        return controlPanelVisible;
+    }
+
+    private void showControlPanel() {
+        handler.post(() -> {
+            if (!canDrawOverlays()) {
+                Toast.makeText(this, "Overlay permission is not enabled", Toast.LENGTH_LONG).show();
+                return;
+            }
+            hideOverlay();
+            windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+            if (windowManager == null) {
+                return;
+            }
+
+            JSONObject config = controlPanelConfig();
+            View view = buildControlPanelView(config);
+            currentOverlay = view;
+            try {
+                windowManager.addView(view, controlPanelLayoutParams(config));
+                controlPanelVisible = true;
+                schedulePanelHide(config);
+                view.post(() -> focusInitialPanelButton(view));
+            } catch (Exception error) {
+                currentOverlay = null;
+                controlPanelVisible = false;
+                Toast.makeText(this, "Could not open quick controls", Toast.LENGTH_LONG).show();
+                Log.w(TAG, "Control panel overlay failed", error);
+            }
+        });
+    }
+
+    private View buildControlPanelView(JSONObject config) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(42), dp(18), dp(42), dp(20));
+        panel.setBackground(panelBackground(config));
+        panel.setFocusable(true);
+        panel.setOnKeyListener((view, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                schedulePanelHide(config);
+            }
+            if (event.getAction() == KeyEvent.ACTION_UP
+                    && (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_MENU)) {
+                hideOverlay();
+                return true;
+            }
+            return false;
+        });
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText(config.optString("title", "Quick controls"));
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(21);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView hint = new TextView(this);
+        hint.setText("BACK TO CLOSE");
+        hint.setTextColor(Color.argb(175, 255, 255, 255));
+        hint.setTextSize(12);
+        heading.addView(hint);
+        panel.addView(heading);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams controlsParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f);
+        controlsParams.setMargins(0, dp(12), 0, dp(8));
+        panel.addView(controls, controlsParams);
+
+        JSONArray buttons = panelButtons(config);
+        List<TextView> buttonViews = new ArrayList<>();
+        for (int i = 0; i < buttons.length(); i++) {
+            JSONObject button = buttons.optJSONObject(i);
+            if (button == null || button.optBoolean("hidden", false)) {
+                continue;
+            }
+            TextView buttonView = buildPanelButton(button, config);
+            LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1f);
+            buttonParams.setMargins(dp(7), 0, dp(7), 0);
+            controls.addView(buttonView, buttonParams);
+            buttonViews.add(buttonView);
+        }
+        linkPanelFocus(buttonViews);
+
+        TextView status = new TextView(this);
+        status.setTag("panel-status");
+        status.setText(buttonViews.isEmpty()
+                ? "No controls configured for this TV"
+                : config.optString("hint", "Use LEFT / RIGHT and SELECT"));
+        status.setTextColor(Color.argb(190, 255, 255, 255));
+        status.setTextSize(13);
+        status.setGravity(Gravity.CENTER);
+        panel.addView(status);
+        return panel;
+    }
+
+    private TextView buildPanelButton(JSONObject button, JSONObject config) {
+        TextView view = new TextView(this);
+        view.setId(View.generateViewId());
+        String icon = button.optString("icon", "");
+        String label = button.optString("label", "Action");
+        view.setText(icon.length() == 0 ? label : icon + "\n" + label);
+        view.setTextColor(Color.WHITE);
+        view.setTextSize(18);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(dp(12), dp(10), dp(12), dp(10));
+        view.setFocusable(true);
+        view.setClickable(true);
+        view.setBackground(panelButtonBackground(false));
+        view.setOnFocusChangeListener((focusedView, hasFocus) -> {
+            focusedView.setBackground(panelButtonBackground(hasFocus));
+            focusedView.setScaleX(hasFocus ? 1.04f : 1f);
+            focusedView.setScaleY(hasFocus ? 1.04f : 1f);
+        });
+        view.setOnKeyListener((focusedView, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                schedulePanelHide(config);
+            }
+            if (event.getAction() == KeyEvent.ACTION_UP
+                    && (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_MENU)) {
+                hideOverlay();
+                return true;
+            }
+            return false;
+        });
+        view.setOnClickListener(clicked -> {
+            schedulePanelHide(config);
+            runPanelAction(button, clicked);
+        });
+        return view;
+    }
+
+    private void linkPanelFocus(List<TextView> buttons) {
+        for (int i = 0; i < buttons.size(); i++) {
+            TextView button = buttons.get(i);
+            button.setNextFocusLeftId(buttons.get(Math.max(0, i - 1)).getId());
+            button.setNextFocusRightId(buttons.get(Math.min(buttons.size() - 1, i + 1)).getId());
+        }
+    }
+
+    private void focusInitialPanelButton(View root) {
+        ArrayList<View> focusables = new ArrayList<>();
+        root.addFocusables(focusables, View.FOCUS_FORWARD);
+        if (focusables.isEmpty()) {
+            root.requestFocus();
+            return;
+        }
+        focusables.get(Math.min(1, focusables.size() - 1)).requestFocus();
+    }
+
+    private void runPanelAction(JSONObject action, View buttonView) {
+        TextView status = findPanelStatus(buttonView.getRootView());
+        String label = action.optString("label", "Action");
+        if (status != null) {
+            status.setText(label + "…");
+        }
+        new Thread(() -> {
+            String resultMessage;
+            try {
+                String url = resolvePanelUrl(action.optString("url", action.optString("requestUrl", "")));
+                if (url.length() == 0) {
+                    throw new IllegalArgumentException("No URL configured");
+                }
+                String method = action.optString("method", action.optString("requestMethod", "GET"));
+                Object requestBody = action.has("body") ? action.opt("body") : action.opt("requestBody");
+                String response = "GET".equalsIgnoreCase(method)
+                        ? httpGet(url)
+                        : httpPost(url, requestBody == null ? "{}" : String.valueOf(requestBody));
+                resultMessage = panelResultMessage(label, response);
+            } catch (Exception error) {
+                resultMessage = label + " failed";
+                Log.w(TAG, "Control panel action failed: " + label, error);
+            }
+            final String message = resultMessage;
+            handler.post(() -> {
+                if (status != null && controlPanelVisible) {
+                    status.setText(message);
+                }
+            });
+        }, "tds-panel-action").start();
+    }
+
+    private TextView findPanelStatus(View root) {
+        if (!(root instanceof android.view.ViewGroup)) {
+            return null;
+        }
+        android.view.ViewGroup group = (android.view.ViewGroup) root;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView && "panel-status".equals(child.getTag())) {
+                return (TextView) child;
+            }
+            TextView nested = findPanelStatus(child);
+            if (nested != null) {
+                return nested;
+            }
+        }
+        return null;
+    }
+
+    private String panelResultMessage(String label, String response) {
+        try {
+            JSONObject result = new JSONObject(response);
+            String groupAction = result.optString("groupAction", "");
+            if ("joined".equalsIgnoreCase(groupAction)) {
+                return label + " · joined group";
+            }
+            if ("left".equalsIgnoreCase(groupAction)) {
+                return label + " · left group";
+            }
+            if (result.has("ok") && !result.optBoolean("ok", true)) {
+                return label + " failed";
+            }
+        } catch (Exception ignored) {
+            // A successful endpoint may return plain text or an empty response.
+        }
+        return label + " sent";
+    }
+
+    private String resolvePanelUrl(String rawUrl) {
+        if (rawUrl == null) {
+            return "";
+        }
+        String url = rawUrl.trim();
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        return url.startsWith("/") ? BuildConfig.TV_LAUNCHER_BASE_URL + url : url;
+    }
+
+    private String httpGet(String url) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(3000);
+        connection.setReadTimeout(5000);
+        connection.setRequestMethod("GET");
+        return readHttpString(connection);
+    }
+
+    private String httpPost(String url, String body) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(3000);
+        connection.setReadTimeout(5000);
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+        try (OutputStream output = connection.getOutputStream()) {
+            output.write(body.getBytes("UTF-8"));
+        }
+        return readHttpString(connection);
+    }
+
+    private String readHttpString(HttpURLConnection connection) throws Exception {
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 400
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        if (stream == null) {
+            connection.disconnect();
+            throw new IllegalStateException("HTTP " + status);
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream))) {
+            StringBuilder result = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                result.append(line);
+            }
+            if (status < 200 || status >= 400) {
+                throw new IllegalStateException("HTTP " + status + ": " + result);
+            }
+            return result.toString();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private JSONObject controlPanelConfig() {
+        try {
+            JSONObject server = new JSONObject(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(MainActivity.PREF_SERVER_CONFIG, "{}"));
+            JSONObject panel = server.optJSONObject("controlPanel");
+            JSONObject settings = server.optJSONObject("settings");
+            if (panel == null && settings != null) {
+                panel = settings.optJSONObject("controlPanel");
+            }
+            return panel == null ? new JSONObject() : panel;
+        } catch (Exception ignored) {
+            return new JSONObject();
+        }
+    }
+
+    private JSONArray panelButtons(JSONObject config) {
+        JSONArray configured = config.optJSONArray("buttons");
+        // Never send commands to another installation's devices by default.
+        return configured == null ? new JSONArray() : configured;
+    }
+
+    private GradientDrawable panelBackground(JSONObject config) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(parseColor(config.optString("backgroundColor", "#EC10151D"), Color.argb(236, 16, 21, 29)));
+        background.setCornerRadii(new float[]{dp(22), dp(22), dp(22), dp(22), 0, 0, 0, 0});
+        background.setStroke(dp(1), Color.argb(70, 255, 255, 255));
+        return background;
+    }
+
+    private GradientDrawable panelButtonBackground(boolean focused) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(focused ? Color.rgb(35, 118, 255) : Color.argb(135, 255, 255, 255));
+        background.setCornerRadius(dp(14));
+        background.setStroke(dp(focused ? 3 : 1), focused ? Color.WHITE : Color.argb(65, 255, 255, 255));
+        return background;
+    }
+
+    private WindowManager.LayoutParams controlPanelLayoutParams(JSONObject config) {
+        int type = Build.VERSION.SDK_INT >= 26
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+        int height = config.optInt("heightDp", 0) > 0
+                ? dp(config.optInt("heightDp", 0))
+                : Math.max(dp(190), getResources().getDisplayMetrics().heightPixels / 4);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                height,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                android.graphics.PixelFormat.TRANSLUCENT);
+        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        params.x = 0;
+        params.y = 0;
+        return params;
+    }
+
+    private void schedulePanelHide(JSONObject config) {
+        handler.removeCallbacks(hideOverlayRunnable);
+        int duration = Math.max(3, config.optInt("duration", config.optInt("durationSeconds", 12)));
+        handler.postDelayed(hideOverlayRunnable, duration * 1000L);
     }
 
     private int notificationDurationSeconds(JSONObject payload) {
@@ -850,6 +1226,7 @@ public class NotificationServerService extends Service {
 
     private void hideOverlay() {
         handler.removeCallbacks(hideOverlayRunnable);
+        controlPanelVisible = false;
         releaseVideoPlayer();
         if (currentOverlay != null && windowManager != null) {
             try {

@@ -7,10 +7,14 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.example.js"
+    "start": "node server.example.js",
+    "test": "node --check public/v2/app.js && node --check server.example.js && node tests/web-ui.test.cjs"
   },
   "dependencies": {
     "express": "^4.18.3",
     "mongodb": "^6.8.0"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.13"
   }
 }

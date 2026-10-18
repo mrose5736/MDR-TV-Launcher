@@ -4,6 +4,14 @@ This folder contains a small public-safe example backend for the TV Launcher app
 
 It mirrors the behaviour expected by the launcher without including any private HomeServer code, hostnames, API keys, or internal auth details.
 
+It also serves the buildless V2 web launcher from `public/v2` at:
+
+```text
+/tvlauncher/v2/
+```
+
+Enable it per TV with `uiVersion: 2` and `webAppUrl: "/tvlauncher/v2/"`. The Android shell retains input switching, Admin authentication, notifications, remote-control handling, and the native offline fallback.
+
 ## What This Backend Stores
 
 Each TV has one JSON document stored by `tvId`.
@@ -37,7 +45,7 @@ Example saved launcher data:
       "id": "sports",
       "label": "Sports",
       "inputId": "com.example.tvinput/.TvPassThroughService/HW1",
-      "url": "/api/devices/1020/channel/401/",
+      "url": "/api/devices/example-receiver/channel/401/",
       "method": "GET",
       "requestBeforeInput": true
     }
@@ -47,7 +55,7 @@ Example saved launcher data:
     "onlyWhenInputActive": true,
     "keys": {
       "KEYCODE_CHANNEL_UP": {
-        "url": "/api/devices/1020/push/9/",
+        "url": "/api/devices/example-receiver/channel-up/",
         "method": "GET",
         "consume": true
       }

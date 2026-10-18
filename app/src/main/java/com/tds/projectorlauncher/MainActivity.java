@@ -32,6 +32,11 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -72,7 +77,7 @@ public class MainActivity extends Activity {
     private static final String BASE_URL = BuildConfig.TV_LAUNCHER_BASE_URL;
     private static final String DEFAULT_REQUIRED_SERVICE = BuildConfig.TV_LAUNCHER_ADMIN_SERVICE;
     private static final String DEFAULT_UNLOCK_SERVICE = BuildConfig.TV_LAUNCHER_UNLOCK_SERVICE;
-    private static final String LAUNCHER_VERSION = "0.2.2";
+    private static final String LAUNCHER_VERSION = BuildConfig.VERSION_NAME;
     private static final String PREFS_NAME = "projector_launcher";
     private static final String PREF_BACKGROUND_URL = "cached_background_url";
     private static final String PREF_ADMIN_VALID_UNTIL = "admin_valid_until";
@@ -101,10 +106,20 @@ public class MainActivity extends Activity {
     private final Map<String, String> inputIconUrls = new HashMap<>();
     private String backgroundBitmapUrl = "";
     private String updateApkUrl = "";
+    private int updateVersionCode = 0;
+    private String updateVersionName = "";
+    private boolean updateRequired = false;
+    private int uiVersion = 1;
+    private String webAppUrl = "";
+    private WebView webLauncherView;
+    private boolean showingWebLauncher = false;
+    private boolean webPageReady = false;
+    private long webRetryAfterMs = 0L;
     private String tvName = "";
     private String tvSubtitle = "";
     private final List<MenuItem> projectorMenuItems = new ArrayList<>();
     private final List<QuickSelectItem> quickSelectItems = new ArrayList<>();
+    private final List<DeviceCommandItem> deviceCommandItems = new ArrayList<>();
     private boolean serverConfigLoaded = false;
     private boolean offlineLockEnabled = false;
     private String offlineLockMessage = "";
@@ -130,6 +145,7 @@ public class MainActivity extends Activity {
     private long lastDeviceStatusPostMs = 0L;
     private long lastInteractionMs = System.currentTimeMillis();
     private AuthSession authSession;
+    private int authRequestGeneration = 0;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable clockTick = new Runnable() {
@@ -138,6 +154,7 @@ public class MainActivity extends Activity {
             if (launcherView != null) {
                 launcherView.invalidate();
             }
+            updateHomeSurface();
             handler.postDelayed(this, 1000L);
         }
     };
@@ -222,6 +239,11 @@ public class MainActivity extends Activity {
         handler.postDelayed(configPoll, 3000L);
         handler.removeCallbacks(networkTick);
         handler.post(networkTick);
+        if (showingWebLauncher && webLauncherView != null) {
+            webLauncherView.onResume();
+            webLauncherView.requestFocus();
+            restoreWebLauncherFocus();
+        }
     }
 
     @Override
@@ -234,13 +256,51 @@ public class MainActivity extends Activity {
         if (tvInputManager != null) {
             tvInputManager.unregisterCallback(tvInputCallback);
         }
+        if (webLauncherView != null) {
+            webLauncherView.onPause();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webLauncherView != null) {
+            webLauncherView.stopLoading();
+            webLauncherView.destroy();
+            webLauncherView = null;
+        }
+        super.onDestroy();
     }
 
     @Override
     public void onBackPressed() {
+        if (showingWebLauncher && webLauncherView != null && webLauncherView.canGoBack()) {
+            webLauncherView.goBack();
+            return;
+        }
         if (launcherView != null) {
             launcherView.handleBackPressed();
         }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (showingWebLauncher && keyCode == KeyEvent.KEYCODE_MENU) {
+            requestAdminAccess();
+            showNativeLauncher();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            lastInteractionMs = System.currentTimeMillis();
+            if (!showingWebLauncher && launcherView != null && launcherView.canShowWebHome()) {
+                updateHomeSurface();
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private String buildTvId() {
@@ -324,6 +384,7 @@ public class MainActivity extends Activity {
         body.put("name", Build.MODEL == null ? "TV" : Build.MODEL);
         body.put("room", "");
         body.put("launcherVersion", LAUNCHER_VERSION);
+        body.put("uiVersion", 1);
         body.put("inputs", new JSONObject());
         JSONObject settings = new JSONObject();
         settings.put("requiredService", DEFAULT_REQUIRED_SERVICE);
@@ -380,6 +441,10 @@ public class MainActivity extends Activity {
         tvSubtitle = config.optString("subtitle", config.optString("description", config.optString("room", "")));
         serverLockEnabled = false;
         JSONObject settings = config.optJSONObject("settings");
+        uiVersion = Math.max(1, config.optInt("uiVersion", settings == null ? 1 : settings.optInt("uiVersion", 1)));
+        webAppUrl = config.optString("webAppUrl", settings == null ? "" : settings.optString("webAppUrl", ""));
+        webAppUrl = resolveConfiguredUrl(webAppUrl);
+        parseUpdateConfig(config, settings);
         if (settings != null) {
             requiredService = settings.optString("requiredService", settings.optString("adminRequiredService", DEFAULT_REQUIRED_SERVICE));
             unlockRequiredService = settings.optString("unlockRequiredService", settings.optString("lockRequiredService", DEFAULT_UNLOCK_SERVICE));
@@ -397,7 +462,9 @@ public class MainActivity extends Activity {
             unlockValidationSeconds = Math.max(60, settings.optInt("unlockValidationSeconds", settings.optInt("unlockSeconds", 14400)));
             burnInShiftDp = Math.max(0, settings.optInt("burnInShiftDp", 28));
             burnInPeriodSeconds = Math.max(30, settings.optInt("burnInPeriodSeconds", 240));
-            updateApkUrl = settings.optString("updateApkUrl", "");
+            if (updateApkUrl.length() == 0) {
+                updateApkUrl = settings.optString("updateApkUrl", "");
+            }
             String backgroundUrl = settings.optString("backgroundImageUrl", settings.optString("wallpaperUrl", ""));
             if (backgroundUrl.length() > 0 && !backgroundUrl.equals(backgroundBitmapUrl)) {
                 downloadBackground(backgroundUrl);
@@ -423,6 +490,7 @@ public class MainActivity extends Activity {
         }
         parseProjectorMenu(config);
         parseQuickSelect(config);
+        parseDeviceCommands(config);
         saveRemoteBridgeConfig(config);
         saveNotificationServerConfig(config);
         startNotificationServer();
@@ -432,7 +500,27 @@ public class MainActivity extends Activity {
             if (launcherView != null) {
                 launcherView.applyConfig();
             }
+            updateHomeSurface();
+            pushConfigToWebLauncher();
         });
+    }
+
+    private void parseUpdateConfig(JSONObject config, JSONObject settings) {
+        updateApkUrl = "";
+        updateVersionCode = 0;
+        updateVersionName = "";
+        updateRequired = false;
+        JSONObject update = config.optJSONObject("update");
+        if (update == null && settings != null) {
+            update = settings.optJSONObject("update");
+        }
+        if (update == null) {
+            return;
+        }
+        updateApkUrl = update.optString("apkUrl", update.optString("url", ""));
+        updateVersionCode = update.optInt("versionCode", update.optInt("targetVersionCode", 0));
+        updateVersionName = update.optString("versionName", update.optString("targetVersionName", ""));
+        updateRequired = update.optBoolean("required", false);
     }
 
     private void parseProjectorMenu(JSONObject config) {
@@ -508,6 +596,54 @@ public class MainActivity extends Activity {
         Collections.sort(quickSelectItems, new Comparator<QuickSelectItem>() {
             @Override
             public int compare(QuickSelectItem first, QuickSelectItem second) {
+                return first.order - second.order;
+            }
+        });
+    }
+
+    private void parseDeviceCommands(JSONObject config) {
+        deviceCommandItems.clear();
+        JSONArray items = config.optJSONArray("deviceCommands");
+        JSONObject settings = config.optJSONObject("settings");
+        if (items == null && settings != null) {
+            items = settings.optJSONArray("deviceCommands");
+        }
+        if (items == null && uiVersion >= 2) {
+            items = config.optJSONArray("projectorMenu");
+            if (items == null && settings != null) {
+                items = settings.optJSONArray("projectorMenu");
+            }
+        }
+        if (items == null) {
+            return;
+        }
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null || item.optBoolean("hidden", false)) {
+                continue;
+            }
+            DeviceCommandItem command = new DeviceCommandItem();
+            command.id = item.optString("id", "device-command-" + i);
+            command.label = item.optString("label", "Command");
+            command.icon = item.optString("icon", "app");
+            command.iconImageUrl = item.optString("iconImageUrl", item.optString("iconUrl", ""));
+            command.action = item.optString("action", "");
+            command.intentAction = item.optString("intentAction", "");
+            command.url = item.optString("url", item.optString("requestUrl", ""));
+            command.method = item.optString("method", item.optString("requestMethod", "POST"));
+            command.body = item.opt("body");
+            if (command.body == null) {
+                command.body = item.opt("requestBody");
+            }
+            command.order = item.optInt("order", i);
+            deviceCommandItems.add(command);
+            if (command.iconImageUrl.length() > 0 && !command.iconImageUrl.equals(inputIconUrls.get(command.id))) {
+                downloadInputIcon(command.id, command.iconImageUrl);
+            }
+        }
+        Collections.sort(deviceCommandItems, new Comparator<DeviceCommandItem>() {
+            @Override
+            public int compare(DeviceCommandItem first, DeviceCommandItem second) {
                 return first.order - second.order;
             }
         });
@@ -618,6 +754,8 @@ public class MainActivity extends Activity {
             status.put("notificationStatusUrl", ip.length() == 0 ? "" : "http://" + ip + ":" + notificationPort + "/status");
             status.put("notificationServerEnabled", notificationServerEnabled());
             status.put("launcherVersion", LAUNCHER_VERSION);
+            status.put("launcherVersionCode", BuildConfig.VERSION_CODE);
+            status.put("uiVersion", uiVersion);
             status.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
             status.put("model", Build.MODEL == null ? "" : Build.MODEL);
             status.put("lastSeen", System.currentTimeMillis() / 1000L);
@@ -873,6 +1011,193 @@ public class MainActivity extends Activity {
         return url;
     }
 
+    private void updateHomeSurface() {
+        if (uiVersion >= 2
+                && webAppUrl.length() > 0
+                && System.currentTimeMillis() >= webRetryAfterMs
+                && launcherView != null
+                && launcherView.canShowWebHome()) {
+            showWebLauncher();
+        } else {
+            showNativeLauncher();
+        }
+    }
+
+    private void showNativeLauncher() {
+        boolean needsAttach = showingWebLauncher || (launcherView != null && launcherView.getParent() == null);
+        showingWebLauncher = false;
+        if (launcherView != null && needsAttach) {
+            setContentView(launcherView);
+        }
+        if (launcherView != null) {
+            launcherView.requestFocus();
+            launcherView.invalidate();
+        }
+    }
+
+    private void showWebLauncher() {
+        String launchUrl = webLaunchUrl();
+        if (webLauncherView == null) {
+            webLauncherView = createWebLauncherView();
+        }
+        if (!showingWebLauncher) {
+            showingWebLauncher = true;
+            setContentView(webLauncherView);
+            webLauncherView.requestFocus();
+            restoreWebLauncherFocus();
+        }
+        Object loadedUrl = webLauncherView.getTag();
+        if (!launchUrl.equals(loadedUrl)) {
+            webLauncherView.setTag(launchUrl);
+            webPageReady = false;
+            webLauncherView.loadUrl(launchUrl);
+        } else {
+            pushConfigToWebLauncher();
+        }
+    }
+
+    private WebView createWebLauncherView() {
+        WebView view = new WebView(this);
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
+        view.setBackgroundColor(Color.BLACK);
+        WebSettings settings = view.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
+        settings.setMediaPlaybackRequiresUserGesture(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.setSafeBrowsingEnabled(true);
+        }
+        view.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView webView, WebResourceRequest request) {
+                if ("tvlauncher".equalsIgnoreCase(request.getUrl().getScheme()) && !request.isForMainFrame()) {
+                    return true;
+                }
+                return handleWebNavigation(request.getUrl());
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView webView, String url) {
+                return handleWebNavigation(Uri.parse(url));
+            }
+
+            @Override
+            public void onReceivedError(WebView webView, WebResourceRequest request, WebResourceError error) {
+                if (request.isForMainFrame()) {
+                    fallbackFromWebLauncher("Web launcher unavailable");
+                }
+            }
+
+            @Override
+            public void onPageFinished(WebView webView, String url) {
+                if (!showingWebLauncher) {
+                    return;
+                }
+                webPageReady = true;
+                webRetryAfterMs = 0L;
+                webView.requestFocus();
+                pushConfigToWebLauncher();
+                restoreWebLauncherFocus();
+            }
+        });
+        return view;
+    }
+
+    private String webLaunchUrl() {
+        return Uri.parse(webAppUrl).buildUpon()
+                .appendQueryParameter("tvId", tvId == null ? "" : tvId)
+                .appendQueryParameter("nativeVersion", LAUNCHER_VERSION)
+                .appendQueryParameter("nativeBridge", "1")
+                .build()
+                .toString();
+    }
+
+    private void pushConfigToWebLauncher() {
+        if (!showingWebLauncher || !webPageReady || webLauncherView == null || serverConfig == null) {
+            return;
+        }
+        String script = "window.tvLauncherApplyConfig && window.tvLauncherApplyConfig("
+                + JSONObject.quote(serverConfig.toString()) + ");";
+        webLauncherView.evaluateJavascript(script, null);
+    }
+
+    private void restoreWebLauncherFocus() {
+        if (showingWebLauncher && webPageReady && webLauncherView != null) {
+            webLauncherView.evaluateJavascript("window.tvLauncherRestoreFocus && window.tvLauncherRestoreFocus();", null);
+        }
+    }
+
+    private boolean handleWebNavigation(Uri uri) {
+        if (uri == null) {
+            return true;
+        }
+        if ("tvlauncher".equalsIgnoreCase(uri.getScheme())) {
+            dispatchWebCommand(uri);
+            return true;
+        }
+        return !sameWebOrigin(uri, Uri.parse(webAppUrl));
+    }
+
+    private boolean sameWebOrigin(Uri first, Uri second) {
+        if (first == null || second == null || first.getScheme() == null || second.getScheme() == null) {
+            return false;
+        }
+        return first.getScheme().equalsIgnoreCase(second.getScheme())
+                && safeEquals(first.getHost(), second.getHost())
+                && effectivePort(first) == effectivePort(second);
+    }
+
+    private boolean safeEquals(String first, String second) {
+        return first == null ? second == null : first.equalsIgnoreCase(second);
+    }
+
+    private int effectivePort(Uri uri) {
+        if (uri.getPort() >= 0) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private void dispatchWebCommand(Uri uri) {
+        if (launcherView == null) {
+            return;
+        }
+        String command = uri.getHost() == null ? "" : uri.getHost();
+        if ("input".equals(command)) {
+            launcherView.launchInputByIdFromWeb(uri.getQueryParameter("id"));
+        } else if ("quick".equals(command)) {
+            launcherView.activateQuickByIdFromWeb(uri.getQueryParameter("id"));
+        } else if ("command".equals(command)) {
+            launcherView.activateDeviceCommandByIdFromWeb(uri.getQueryParameter("id"));
+        } else if ("admin".equals(command)) {
+            requestAdminAccess();
+            showNativeLauncher();
+        } else if ("refresh".equals(command)) {
+            fetchOrCreateConfig();
+        }
+    }
+
+    private void fallbackFromWebLauncher(String message) {
+        handler.post(() -> {
+            webRetryAfterMs = System.currentTimeMillis() + 30000L;
+            webPageReady = false;
+            if (webLauncherView != null) {
+                webLauncherView.stopLoading();
+                webLauncherView.setTag(null);
+            }
+            showNativeLauncher();
+            if (launcherView != null) {
+                launcherView.setStatus(message);
+            }
+        });
+    }
+
     private void launchInput(InputItem item) {
         String label = launcherView == null ? item.label : launcherView.displayLabel(item);
         Uri inputUri = TvContract.buildChannelUriForPassthroughInput(item.id);
@@ -1076,6 +1401,9 @@ public class MainActivity extends Activity {
     }
 
     private void requestAccess(String purpose, String service, String requester, int validationSeconds) {
+        final int generation = ++authRequestGeneration;
+        authSession = null;
+        handler.removeCallbacks(authPoll);
         launcherView.showAuth(purpose, "Creating approval session...");
         new Thread(() -> {
             try {
@@ -1090,15 +1418,19 @@ public class MainActivity extends Activity {
                 session.sessionId = response.optString("sessionId", "");
                 session.pollUrl = response.optString("pollUrl", "");
                 session.approveUrl = response.optString("approveUrl", response.optString("qrData", ""));
-                authSession = session;
-                authQrBitmap = session.approveUrl.length() == 0 ? null : createQrBitmap(session.approveUrl, 320);
+                final Bitmap qrBitmap = session.approveUrl.length() == 0 ? null : createQrBitmap(session.approveUrl, 320);
                 handler.post(() -> {
+                    if (generation != authRequestGeneration) return;
+                    authSession = session;
+                    authQrBitmap = qrBitmap;
                     launcherView.showAuth(purpose, session.approveUrl.length() == 0 ? "Approval session created" : session.approveUrl);
                     handler.removeCallbacks(authPoll);
                     handler.postDelayed(authPoll, 1200L);
                 });
             } catch (Exception error) {
-                handler.post(() -> launcherView.showAuth(purpose, "Unable to create approval session"));
+                handler.post(() -> {
+                    if (generation == authRequestGeneration) launcherView.showAuth(purpose, "Unable to create approval session");
+                });
             }
         }).start();
     }
@@ -1120,6 +1452,7 @@ public class MainActivity extends Activity {
 
     private void pollAuthSession() {
         final AuthSession session = authSession;
+        final int generation = authRequestGeneration;
         if (session == null || session.pollUrl.length() == 0) {
             return;
         }
@@ -1128,6 +1461,8 @@ public class MainActivity extends Activity {
                 JSONObject response = new JSONObject(httpGet(BASE_URL + session.pollUrl));
                 boolean validated = response.optBoolean("validated", false);
                 String status = response.optString("status", "pending");
+                handler.post(() -> {
+                if (generation != authRequestGeneration || authSession != session) return;
                 if (validated) {
                     long nowSeconds = System.currentTimeMillis() / 1000L;
                     long responseValidUntil = response.optLong("validUntil", nowSeconds + validationSecondsForSession(session));
@@ -1144,21 +1479,22 @@ public class MainActivity extends Activity {
                         persistCachedApprovals();
                     }
                     authSession = null;
-                    handler.post(() -> {
-                        if ("unlock".equals(session.purpose)) {
-                            launcherView.returnHome();
-                        } else {
-                            launcherView.openAdmin();
-                        }
-                    });
+                    if ("unlock".equals(session.purpose)) {
+                        launcherView.returnHome();
+                    } else {
+                        launcherView.openAdmin();
+                    }
                 } else if ("denied".equals(status) || "expired".equals(status)) {
                     authSession = null;
-                    handler.post(() -> launcherView.showAuth(session.purpose, "Approval " + status));
+                    launcherView.showAuth(session.purpose, "Approval " + status);
                 } else {
                     handler.postDelayed(authPoll, 1500L);
                 }
+                });
             } catch (Exception error) {
-                handler.post(() -> launcherView.showAuth(session.purpose, "Approval check failed"));
+                handler.post(() -> {
+                    if (generation == authRequestGeneration && authSession == session) launcherView.showAuth(session.purpose, "Approval check failed");
+                });
             }
         }).start();
     }
@@ -1190,6 +1526,21 @@ public class MainActivity extends Activity {
             return;
         }
         openFirstAvailable(new Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl)));
+    }
+
+    private String updateStatusText() {
+        if (updateApkUrl == null || updateApkUrl.trim().length() == 0) {
+            return "No update assigned · installed " + LAUNCHER_VERSION;
+        }
+        boolean newer = updateVersionCode > BuildConfig.VERSION_CODE;
+        String target = updateVersionName.length() > 0 ? updateVersionName : (updateVersionCode > 0 ? "build " + updateVersionCode : "assigned build");
+        if (newer) {
+            return (updateRequired ? "Required update " : "Update available ") + target + " · installed " + LAUNCHER_VERSION;
+        }
+        if (updateVersionCode > 0 && updateVersionCode <= BuildConfig.VERSION_CODE) {
+            return "Up to date · installed " + LAUNCHER_VERSION;
+        }
+        return "Update assigned " + target + " · installed " + LAUNCHER_VERSION;
     }
 
     private static final class AuthSession {
@@ -1232,6 +1583,19 @@ public class MainActivity extends Activity {
         String method;
         Object body;
         boolean requestBeforeInput;
+        int order;
+    }
+
+    private static final class DeviceCommandItem {
+        String id;
+        String label;
+        String icon;
+        String iconImageUrl;
+        String action;
+        String intentAction;
+        String url;
+        String method;
+        Object body;
         int order;
     }
 
@@ -1388,6 +1752,11 @@ public class MainActivity extends Activity {
         void returnHome() {
             mode = MODE_HOME;
             invalidate();
+            updateHomeSurface();
+        }
+
+        boolean canShowWebHome() {
+            return mode == MODE_HOME && !lockScreenEnabled && !offlineLockEnabled && !isIdle();
         }
 
         void showAuth(String purpose, String message) {
@@ -1400,7 +1769,12 @@ public class MainActivity extends Activity {
         void handleBackPressed() {
             lastInteractionMs = System.currentTimeMillis();
             if (mode == MODE_ADMIN || mode == MODE_AUTH) {
-                mode = MODE_HOME;
+                ++authRequestGeneration;
+                authSession = null;
+                authQrBitmap = null;
+                handler.removeCallbacks(authPoll);
+                returnHome();
+                return;
             }
             invalidate();
         }
@@ -1654,11 +2028,184 @@ public class MainActivity extends Activity {
         }
 
         private void drawHome(Canvas canvas) {
+            if (uiVersion >= 2) {
+                drawHomeV2(canvas);
+                return;
+            }
             drawClock(canvas, homeFocus == clockIndex(), false, 0);
             drawTitle(canvas);
             drawSourceSection(canvas);
             drawQuickSelectSection(canvas);
             drawStatusLine(canvas);
+        }
+
+        private void drawHomeV2(Canvas canvas) {
+            float margin = dp(52);
+            float panelWidth = deviceCommandItems.isEmpty() ? 0f : Math.min(dp(330), getWidth() * 0.29f);
+            float panelGap = panelWidth > 0 ? dp(30) : 0f;
+            float contentRight = getWidth() - margin - panelWidth - panelGap;
+
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setFakeBoldText(true);
+            textPaint.setTextSize(sp(40));
+            textPaint.setColor(Color.WHITE);
+            canvas.drawText(tvName == null || tvName.trim().length() == 0 ? "TV" : tvName.trim(), margin, dp(86), textPaint);
+
+            String subtitle = tvSubtitle == null ? "" : tvSubtitle.trim();
+            if (subtitle.length() > 0) {
+                smallTextPaint.setTextAlign(Paint.Align.LEFT);
+                smallTextPaint.setTextSize(sp(15));
+                smallTextPaint.setColor(Color.argb(190, 255, 255, 255));
+                canvas.drawText(subtitle, margin, dp(116), smallTextPaint);
+            }
+
+            drawV2Clock(canvas, homeFocus == clockIndex());
+            drawV2Sources(canvas, margin, contentRight, dp(210));
+            drawV2QuickSelect(canvas, margin, contentRight, dp(500));
+            if (panelWidth > 0) {
+                drawV2DeviceCommands(canvas, contentRight + panelGap, dp(178), panelWidth, dp(410));
+            }
+            drawStatusLine(canvas);
+        }
+
+        private void drawV2Clock(Canvas canvas, boolean focused) {
+            String time = clockFormat.format(new Date());
+            textPaint.setTextAlign(Paint.Align.RIGHT);
+            textPaint.setFakeBoldText(false);
+            textPaint.setTextSize(sp(48));
+            float right = getWidth() - dp(58);
+            float baseline = dp(86);
+            float textWidth = textPaint.measureText(time);
+            if (focused) {
+                Paint.FontMetrics metrics = textPaint.getFontMetrics();
+                rect.set(right - textWidth - dp(16), baseline + metrics.ascent - dp(7), right + dp(16), baseline + metrics.descent + dp(7));
+                drawFocusPill(canvas, rect);
+            }
+            textPaint.setColor(Color.WHITE);
+            canvas.drawText(time, right, baseline, textPaint);
+        }
+
+        private void drawV2Sources(Canvas canvas, float left, float right, float top) {
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(15));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(Color.argb(220, 255, 255, 255));
+            canvas.drawText("SOURCES", left, top - dp(22), textPaint);
+
+            if (visibleInputs.isEmpty()) {
+                smallTextPaint.setTextSize(sp(15));
+                smallTextPaint.setColor(Color.argb(190, 255, 255, 255));
+                canvas.drawText("No visible inputs", left, top + dp(40), smallTextPaint);
+                return;
+            }
+
+            float gap = dp(16);
+            int visibleCards = Math.min(4, visibleInputs.size());
+            float available = right - left;
+            float cardWidth = Math.min(dp(210), (available - gap * Math.max(0, visibleCards - 1)) / visibleCards);
+            float cardHeight = dp(142);
+            for (int i = 0; i < visibleInputs.size(); i++) {
+                float x = left + i * (cardWidth + gap);
+                if (x + cardWidth > right + dp(2)) {
+                    break;
+                }
+                drawV2SourceCard(canvas, visibleInputs.get(i), homeFocus == i, x, top, cardWidth, cardHeight);
+            }
+        }
+
+        private void drawV2SourceCard(Canvas canvas, InputItem item, boolean focused, float x, float y, float width, float height) {
+            rect.set(x, y, x + width, y + height);
+            cardPaint.setStyle(Paint.Style.FILL);
+            cardPaint.setColor(focused ? Color.argb(242, 246, 246, 244) : Color.argb(185, 20, 23, 27));
+            canvas.drawRoundRect(rect, dp(11), dp(11), cardPaint);
+            focusPaint.setStrokeWidth(focused ? dp(4) : dp(1));
+            focusPaint.setColor(focused ? Color.WHITE : Color.argb(90, 255, 255, 255));
+            canvas.drawRoundRect(rect, dp(11), dp(11), focusPaint);
+
+            int iconColor = focused ? Color.rgb(24, 24, 24) : Color.WHITE;
+            drawInputIcon(canvas, item, x + dp(42), y + height / 2f - dp(8), iconColor);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(19));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(iconColor);
+            canvas.drawText(displayLabel(item), x + dp(76), y + height / 2f + dp(1), textPaint);
+        }
+
+        private void drawV2QuickSelect(Canvas canvas, float left, float right, float top) {
+            if (quickSelectItems.isEmpty()) {
+                return;
+            }
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(14));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(Color.argb(215, 255, 255, 255));
+            canvas.drawText("QUICK SELECT", left, top - dp(18), textPaint);
+
+            float gap = dp(14);
+            float cardWidth = Math.min(dp(190), (right - left - gap * Math.max(0, quickSelectItems.size() - 1)) / Math.max(1, quickSelectItems.size()));
+            float cardHeight = dp(78);
+            int start = v2QuickStartIndex();
+            for (int i = 0; i < quickSelectItems.size(); i++) {
+                float x = left + i * (cardWidth + gap);
+                if (x + cardWidth > right + dp(2)) {
+                    break;
+                }
+                drawV2QuickSelectCard(canvas, quickSelectItems.get(i), homeFocus == start + i, x, top, cardWidth, cardHeight);
+            }
+        }
+
+        private void drawV2QuickSelectCard(Canvas canvas, QuickSelectItem item, boolean focused, float x, float y, float width, float height) {
+            rect.set(x, y, x + width, y + height);
+            cardPaint.setStyle(Paint.Style.FILL);
+            cardPaint.setColor(focused ? Color.argb(240, 246, 246, 244) : Color.argb(170, 18, 22, 26));
+            canvas.drawRoundRect(rect, dp(9), dp(9), cardPaint);
+            focusPaint.setStrokeWidth(focused ? dp(3) : dp(1));
+            focusPaint.setColor(focused ? Color.WHITE : Color.argb(75, 255, 255, 255));
+            canvas.drawRoundRect(rect, dp(9), dp(9), focusPaint);
+            int color = focused ? Color.rgb(24, 24, 24) : Color.WHITE;
+            drawPresetIcon(canvas, item.id, item.icon, x + dp(36), y + height / 2f, color);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(16));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(color);
+            canvas.drawText(item.label == null ? "Quick" : item.label, x + dp(65), y + height / 2f + dp(6), textPaint);
+        }
+
+        private void drawV2DeviceCommands(Canvas canvas, float x, float y, float width, float height) {
+            rect.set(x, y, x + width, y + height);
+            cardPaint.setStyle(Paint.Style.FILL);
+            cardPaint.setColor(Color.argb(175, 17, 22, 27));
+            canvas.drawRoundRect(rect, dp(13), dp(13), cardPaint);
+            focusPaint.setStrokeWidth(dp(1));
+            focusPaint.setColor(Color.argb(85, 255, 255, 255));
+            canvas.drawRoundRect(rect, dp(13), dp(13), focusPaint);
+
+            textPaint.setTextAlign(Paint.Align.LEFT);
+            textPaint.setTextSize(sp(14));
+            textPaint.setFakeBoldText(true);
+            textPaint.setColor(Color.argb(220, 255, 255, 255));
+            canvas.drawText("DEVICE CONTROLS", x + dp(22), y + dp(38), textPaint);
+
+            float rowsTop = y + dp(58);
+            float rowHeight = Math.min(dp(92), (height - dp(76)) / Math.max(1, deviceCommandItems.size()));
+            int start = v2DeviceStartIndex();
+            for (int i = 0; i < deviceCommandItems.size(); i++) {
+                DeviceCommandItem item = deviceCommandItems.get(i);
+                float rowTop = rowsTop + i * rowHeight;
+                boolean focused = homeFocus == start + i;
+                rect.set(x + dp(14), rowTop, x + width - dp(14), rowTop + rowHeight - dp(5));
+                cardPaint.setColor(focused ? Color.argb(240, 246, 246, 244) : Color.argb(55, 255, 255, 255));
+                canvas.drawRoundRect(rect, dp(9), dp(9), cardPaint);
+                int color = focused ? Color.rgb(24, 24, 24) : Color.WHITE;
+                drawPresetIcon(canvas, item.id, item.icon, x + dp(45), rowTop + rowHeight / 2f - dp(2), color);
+                textPaint.setTextSize(sp(17));
+                textPaint.setColor(color);
+                canvas.drawText(item.label, x + dp(76), rowTop + rowHeight / 2f + dp(5), textPaint);
+                textPaint.setTextAlign(Paint.Align.RIGHT);
+                textPaint.setTextSize(sp(23));
+                canvas.drawText("›", x + width - dp(30), rowTop + rowHeight / 2f + dp(7), textPaint);
+                textPaint.setTextAlign(Paint.Align.LEFT);
+            }
         }
 
         private void drawStatusLine(Canvas canvas) {
@@ -1901,7 +2448,7 @@ public class MainActivity extends Activity {
             y += rowHeight + gap;
             drawAdminRow(canvas, "Refresh config", serverConfigLoaded ? "Poll server now" : "Create/read server config", adminFocus == ADMIN_REFRESH_CONFIG, left, y, width, rowHeight);
             y += rowHeight + gap;
-            drawAdminRow(canvas, "Update launcher", updateApkUrl.length() > 0 ? updateApkUrl : "No update URL in server config", adminFocus == ADMIN_UPDATE, left, y, width, rowHeight);
+            drawAdminRow(canvas, "Update launcher", updateStatusText(), adminFocus == ADMIN_UPDATE, left, y, width, rowHeight);
             y += rowHeight + gap;
             drawAdminRow(canvas, "Lock TV now", "Set server lock and return to locked screen", adminFocus == ADMIN_LOCK_NOW, left, y, width, rowHeight);
             y += rowHeight + gap;
@@ -2038,6 +2585,8 @@ public class MainActivity extends Activity {
                 drawGameIcon(canvas, cx, cy, color);
             } else if ("app".equals(icon)) {
                 drawAppIcon(canvas, cx, cy, color);
+            } else if ("lock".equals(icon)) {
+                drawLockIcon(canvas, cx, cy, color);
             } else {
                 drawTvIcon(canvas, cx, cy, color);
             }
@@ -2164,8 +2713,7 @@ public class MainActivity extends Activity {
             lastInteractionMs = System.currentTimeMillis();
             if (mode == MODE_AUTH) {
                 if (keyCode == KeyEvent.KEYCODE_BACK) {
-                    mode = MODE_HOME;
-                    invalidate();
+                    handleBackPressed();
                 }
                 return true;
             }
@@ -2239,6 +2787,9 @@ public class MainActivity extends Activity {
         }
 
         private boolean handleHomeKeyDown(int keyCode) {
+            if (uiVersion >= 2) {
+                return handleHomeV2KeyDown(keyCode);
+            }
             int tileCount = homeTileCount();
             int clockIndex = clockIndex();
             int quickStart = quickStartIndex();
@@ -2285,6 +2836,73 @@ public class MainActivity extends Activity {
             return false;
         }
 
+        private boolean handleHomeV2KeyDown(int keyCode) {
+            int inputCount = visibleInputs.size();
+            int quickStart = v2QuickStartIndex();
+            int commandStart = v2DeviceStartIndex();
+            int clock = clockIndex();
+            if (keyCode == KeyEvent.KEYCODE_MENU) {
+                requestAdminAccess();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (homeFocus < inputCount - 1) {
+                    homeFocus++;
+                } else if (homeFocus >= quickStart && homeFocus < commandStart - 1) {
+                    homeFocus++;
+                } else if (homeFocus < commandStart && !deviceCommandItems.isEmpty()) {
+                    homeFocus = commandStart;
+                } else if (homeFocus >= commandStart && homeFocus < clock) {
+                    homeFocus = clock;
+                }
+                invalidate();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (homeFocus == clock && !deviceCommandItems.isEmpty()) {
+                    homeFocus = commandStart;
+                } else if (homeFocus > commandStart && homeFocus < clock) {
+                    homeFocus = Math.max(0, inputCount - 1);
+                } else if (homeFocus > quickStart && homeFocus < commandStart) {
+                    homeFocus--;
+                } else if (homeFocus > 0 && homeFocus < inputCount) {
+                    homeFocus--;
+                } else if (homeFocus == commandStart) {
+                    homeFocus = quickSelectItems.isEmpty() ? Math.max(0, inputCount - 1) : quickStart;
+                }
+                invalidate();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (homeFocus >= commandStart && homeFocus < clock) {
+                    homeFocus = homeFocus > commandStart ? homeFocus - 1 : clock;
+                } else if (homeFocus >= quickStart && homeFocus < commandStart) {
+                    int offset = homeFocus - quickStart;
+                    homeFocus = inputCount > 0 ? Math.min(inputCount - 1, offset) : clock;
+                } else {
+                    homeFocus = clock;
+                }
+                invalidate();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (homeFocus == clock) {
+                    homeFocus = inputCount > 0 ? 0 : (!quickSelectItems.isEmpty() ? quickStart : commandStart);
+                } else if (homeFocus < inputCount) {
+                    int offset = homeFocus;
+                    homeFocus = !quickSelectItems.isEmpty() ? quickStart + Math.min(quickSelectItems.size() - 1, offset)
+                            : (!deviceCommandItems.isEmpty() ? commandStart : homeFocus);
+                } else if (homeFocus >= quickStart && homeFocus < commandStart && !deviceCommandItems.isEmpty()) {
+                    homeFocus = commandStart;
+                } else if (homeFocus >= commandStart && homeFocus < clock - 1) {
+                    homeFocus++;
+                }
+                invalidate();
+                return true;
+            }
+            return false;
+        }
+
         private boolean handleAdminKeyDown(int keyCode) {
             if (keyCode == KeyEvent.KEYCODE_BACK) {
                 mode = MODE_HOME;
@@ -2307,6 +2925,10 @@ public class MainActivity extends Activity {
         }
 
         private void activateHomeFocus() {
+            if (uiVersion >= 2) {
+                activateHomeV2Focus();
+                return;
+            }
             int inputCount = visibleInputs.size();
             int lockTileCount = showHomeLockTile() ? 1 : 0;
             if (homeFocus < inputCount) {
@@ -2327,7 +2949,33 @@ public class MainActivity extends Activity {
         }
 
         private int homeTileCount() {
+            if (uiVersion >= 2) {
+                return visibleInputs.size() + quickSelectItems.size() + deviceCommandItems.size();
+            }
             return primaryTileCount() + quickSelectItems.size();
+        }
+
+        private int v2QuickStartIndex() {
+            return visibleInputs.size();
+        }
+
+        private int v2DeviceStartIndex() {
+            return visibleInputs.size() + quickSelectItems.size();
+        }
+
+        private void activateHomeV2Focus() {
+            int inputCount = visibleInputs.size();
+            int quickStart = v2QuickStartIndex();
+            int commandStart = v2DeviceStartIndex();
+            if (homeFocus < inputCount) {
+                launchInput(visibleInputs.get(homeFocus));
+            } else if (homeFocus < commandStart) {
+                activateQuickSelect(quickSelectItems.get(homeFocus - quickStart));
+            } else if (homeFocus < clockIndex()) {
+                activateDeviceCommand(deviceCommandItems.get(homeFocus - commandStart));
+            } else {
+                requestAdminAccess();
+            }
         }
 
         private int primaryTileCount() {
@@ -2365,6 +3013,35 @@ public class MainActivity extends Activity {
             return null;
         }
 
+        void launchInputByIdFromWeb(String inputId) {
+            InputItem input = findInputById(inputId);
+            if (input != null) {
+                launchInput(input);
+            } else {
+                Toast.makeText(getContext(), "Input is not available", Toast.LENGTH_LONG).show();
+            }
+        }
+
+        void activateQuickByIdFromWeb(String id) {
+            for (QuickSelectItem item : quickSelectItems) {
+                if (item.id.equals(id)) {
+                    activateQuickSelect(item);
+                    return;
+                }
+            }
+            Toast.makeText(getContext(), "Quick action is not available", Toast.LENGTH_LONG).show();
+        }
+
+        void activateDeviceCommandByIdFromWeb(String id) {
+            for (DeviceCommandItem item : deviceCommandItems) {
+                if (item.id.equals(id)) {
+                    activateDeviceCommand(item);
+                    return;
+                }
+            }
+            Toast.makeText(getContext(), "Device command is not available", Toast.LENGTH_LONG).show();
+        }
+
         private void activateMenuItem(MenuItem item) {
             String action = item.action == null ? "" : item.action;
             if ("projectorSettings".equals(action) || "projector".equals(action)) {
@@ -2382,6 +3059,40 @@ public class MainActivity extends Activity {
                 openFirstAvailable(new Intent(item.intentAction.trim()));
             } else {
                 openProjectorSettings();
+            }
+        }
+
+        private void activateDeviceCommand(DeviceCommandItem item) {
+            if (item.url != null && item.url.trim().length() > 0) {
+                sendConfiguredRequest(item.url, item.method, item.body, item.label + " requested");
+                return;
+            }
+            String action = item.action == null ? "" : item.action.trim();
+            if ("projectorSettings".equals(action) || "projector".equals(action)) {
+                openProjectorSettings();
+            } else if ("inputSettings".equals(action) || "inputs".equals(action)) {
+                openInputSettings();
+            } else if ("tvSettings".equals(action) || "settings".equals(action)) {
+                openSystemSettings();
+            } else if ("refreshConfig".equals(action) || "refresh".equals(action)) {
+                fetchOrCreateConfig();
+                Toast.makeText(getContext(), "Refreshing config", Toast.LENGTH_SHORT).show();
+            } else if ("update".equals(action)) {
+                openUpdateUrl();
+            } else if ("lock".equals(action) || "lockTv".equals(action)) {
+                lockTvNow();
+            } else if ("controlPanel".equals(action) || "panel".equals(action)) {
+                Intent intent = new Intent(getContext(), NotificationServerService.class);
+                intent.setAction(NotificationServerService.ACTION_SHOW_PANEL);
+                try {
+                    getContext().startService(intent);
+                } catch (Exception error) {
+                    Toast.makeText(getContext(), "Quick controls are unavailable", Toast.LENGTH_LONG).show();
+                }
+            } else if (item.intentAction != null && item.intentAction.trim().length() > 0) {
+                openFirstAvailable(new Intent(item.intentAction.trim()));
+            } else {
+                Toast.makeText(getContext(), "No command configured", Toast.LENGTH_SHORT).show();
             }
         }
 

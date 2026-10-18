@@ -11,3 +11,10 @@ gradle.properties
 *.aab
 *.keystore
 *.jks
+node_modules/
+
+# Private room integrations, configuration and deployment notes stay local.
+/backend/apache/
+/backend/deploy/
+/backend/tests/aidan-room.test.php
+/backend/tests/room-state.test.php

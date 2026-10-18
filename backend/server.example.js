@@ -1,12 +1,26 @@
 import express from "express";
 import { MongoClient } from "mongodb";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const mongoUrl = process.env.MONGO_URL ?? "mongodb://127.0.0.1:27017";
 const dbName = process.env.MONGO_DB ?? "tv_launcher_example";
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 app.use(express.json({ limit: "1mb" }));
+app.use("/tvlauncher/v2", express.static(path.join(currentDirectory, "public", "v2"), {
+  etag: true,
+  index: "index.html",
+  maxAge: 0,
+  setHeaders(response) {
+    response.setHeader("Cache-Control", "no-cache");
+    response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Referrer-Policy", "no-referrer");
+  }
+}));
 
 const client = new MongoClient(mongoUrl);
 await client.connect();
