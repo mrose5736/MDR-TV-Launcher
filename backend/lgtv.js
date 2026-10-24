@@ -149,3 +149,36 @@ export async function lgOff(tvId) {
   if (tv.type === "netcast") return netcast(tvId, tv, () => netcastKey(tv, KEY.power));
   await lgSession(tv, send => send("ssap://system/turnOff"));
 }
+
+export async function pairWebos(tvId, ip) {
+  const clientKey = await lgSession({ ip }, async (_send, key) => key, 60000);
+  saveCredentials(tvId, { ip, clientKey });
+}
+
+// Netcast: step 1 makes the TV display a key, step 2 verifies it and saves it.
+export const netcastStartPair = ip => roap({ ip }, "auth", "<auth><type>AuthKeyReq</type></auth>");
+
+export async function netcastFinishPair(tvId, ip, key) {
+  await netcastAuth({ ip }, key);
+  saveCredentials(tvId, { ip, type: "netcast", clientKey: key });
+}
+
+export function pairedTvs() {
+  return Object.fromEntries(Object.entries(readCredentials()).map(([id, tv]) => [id, { ip: tv.ip, type: tv.type ?? "webos" }]));
+}
+
+export async function lgStatus(tvId) {
+  const tv = pairedTv(tvId);
+  const type = tv.type ?? "webos";
+  try {
+    if (type === "netcast") {
+      return { type, ip: tv.ip, online: true, current: await netcastCurrentInput(tv), inputs: await lgInputs(tvId) };
+    }
+    const inputs = await lgInputs(tvId);
+    const app = await lgSession(tv, send => send("ssap://com.webos.applicationManager/getForegroundAppInfo"));
+    const hdmi = /hdmi(\d)/.exec(app.appId ?? "")?.[1];
+    return { type, ip: tv.ip, online: true, current: hdmi ? `HDMI_${hdmi}` : app.appId, inputs };
+  } catch (error) {
+    return { type, ip: tv.ip, online: false, error: error.message };
+  }
+}

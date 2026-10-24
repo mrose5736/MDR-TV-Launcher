@@ -430,3 +430,17 @@ MONGO_DB=tv_launcher_example
 
 - `server.example.js` - complete Express + MongoDB example implementation.
 - `package.json` - minimal dependencies and start script.
+
+## Docker deployment
+
+`docker-compose.yml` runs the backend and MongoDB. Put `ADMIN_PASSWORD=...` in a `.env` beside it; the admin dashboard is at `/admin/` (HTTP Basic auth, any username). Pairing keys live in `./data/lgtv.json`.
+
+```bash
+docker compose up -d --build
+```
+
+On GitHub, `.github/workflows/backend.yml` publishes `ghcr.io/mrose5736/mdr-tv-launcher-backend:latest` on every push to `main` that touches `backend/`. The server polls for it with a cron entry (no inbound access to the LAN):
+
+```cron
+*/5 * * * * cd ~/tv-launcher && docker compose pull -q backend && docker compose up -d backend
+```

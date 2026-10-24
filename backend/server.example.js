@@ -2,6 +2,7 @@ import express from "express";
 import { MongoClient } from "mongodb";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerAdmin } from "./admin.js";
 import { lgInputs, lgOff, lgSwitchInput } from "./lgtv.js";
 
 const app = express();
@@ -28,6 +29,7 @@ await client.connect();
 
 const db = client.db(dbName);
 const tvLauncher = db.collection("TVLauncher");
+registerAdmin(app, { tvLauncher, unixTime });
 
 function unixTime() {
   return Math.floor(Date.now() / 1000);

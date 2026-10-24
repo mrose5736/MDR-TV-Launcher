@@ -1,0 +1,26 @@
+services:
+  backend:
+    image: ghcr.io/mrose5736/mdr-tv-launcher-backend:latest
+    build: .
+    restart: unless-stopped
+    # This host uses Docker user-namespace remapping: container root is the unprivileged host user
+    # that owns ./data, so root is needed to read/write lgtv.json there.
+    user: "0:0"
+    ports:
+      - "8110:3000"
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: tv_launcher
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      LG_TVS_FILE: /data/lgtv.json
+    volumes:
+      - ./data:/data
+    depends_on:
+      - mongo
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo:/data/db
+volumes:
+  mongo:

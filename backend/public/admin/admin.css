@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7; --card: #fff; --text: #1b1f24; --muted: #66707c; --line: #d9dde3; --accent: #1f6feb;
+  --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1216; --card: #181c22; --text: #e6e9ee; --muted: #8b95a3; --line: #2b323b; --accent: #4c8dff; --ok: #3fb950; --bad: #f85149; --warn: #d29922; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; padding: 16px; max-width: 960px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0; }
+form { display: flex; flex-wrap: wrap; gap: 8px; }
+input, select, button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: inherit; }
+button { cursor: pointer; background: var(--accent); border-color: var(--accent); color: #fff; }
+button.quiet { background: transparent; color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+#message { max-width: 960px; margin: 0 auto; padding: 0 16px; min-height: 1.4em; color: var(--muted); }
+#message.error { color: var(--bad); }
+main { display: grid; gap: 16px; max-width: 960px; margin: 0 auto; padding: 0 16px 32px; }
+.tv { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+.tv-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+.tv-head h2 { font-size: 17px; margin: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; }
+.badge.online { color: var(--ok); } .badge.offline { color: var(--bad); } .badge.unpaired, .badge.checking { color: var(--warn); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row input[type=text] { flex: 1 1 140px; min-width: 0; }
+.row input.order { flex: 0 0 64px; }
+.url { word-break: break-all; font: 13px ui-monospace, monospace; }

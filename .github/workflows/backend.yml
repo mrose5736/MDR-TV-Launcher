@@ -1,0 +1,38 @@
+name: Backend image
+
+# Builds and publishes the backend image. The VM (MDR-DOCKER-01) pulls it on a timer,
+# so no inbound access to the LAN is needed.
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci && npm test
+        working-directory: backend
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ghcr.io/mrose5736/mdr-tv-launcher-backend:latest
+            ghcr.io/mrose5736/mdr-tv-launcher-backend:${{ github.sha }}

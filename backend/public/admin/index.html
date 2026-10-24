@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Launcher Admin</title>
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<header>
+  <h1>TV Launcher</h1>
+  <form id="add-tv">
+    <input name="tvId" placeholder="tv id e.g. lounge-tv" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,39}" required>
+    <input name="name" placeholder="Display name" required>
+    <button>Add TV</button>
+  </form>
+</header>
+<p id="message" role="status"></p>
+<main id="tvs"></main>
+<script src="admin.js"></script>
+</body>
+</html>
