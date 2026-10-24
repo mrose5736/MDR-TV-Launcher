@@ -366,6 +366,14 @@ LG webOS sets can't run the Android launcher. Put a small PC on one HDMI port, o
 node lg-pair.mjs lounge-tv 10.95.0.96
 ```
 
+   2013–2014 "Netcast" sets (e.g. 42LB570V, no port 3000, menus without webOS cards) pair with the key the TV displays, and are driven by remote-key presses:
+
+```bash
+node lg-pair.mjs bedroom-tv 10.95.0.72 netcast
+```
+
+   Netcast input ids are `ANTENNA`, `HDMI1`, `AV1`, `AV2`, `COMPONENT`, `HDMI2`, `HDMI3` (the `HDMI_2` spelling also works). The driver moves along the on-screen input list from the TV's current input, so if your set's list order differs, add `"inputOrder": [...]` to its entry in `lgtv.json`. Netcast power is a toggle, so `/lg/off` only works while the TV is on.
+
 3. Config for that `tvId`: use the LG input ids (`GET /api/tvlauncher/lounge-tv/lg/inputs` lists them) as `inputId`:
 
 ```json
