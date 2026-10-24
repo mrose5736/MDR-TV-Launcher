@@ -355,6 +355,41 @@ Content-Type: application/json
 
 Android TV commonly blocks true key injection from normal apps with `INJECT_EVENTS` errors. The launcher falls back for known system keys such as Home, Back, Sleep, Power, and TV Input, but D-pad/channel/number injection may still be blocked by the TV firmware.
 
+## LG webOS TVs (kiosk PC)
+
+LG webOS sets can't run the Android launcher. Put a small PC on one HDMI port, open V2 in a kiosk browser, and let this backend switch the TV's inputs over the LAN (SSAP). Requires Node 22+.
+
+1. On the TV: fixed IP, and on 2014 sets enable **Settings → Network → LG Connect Apps**.
+2. Pair once (accept the prompt on the TV). Credentials are saved to `lgtv.json`, which is git-ignored and never served to the browser:
+
+```bash
+node lg-pair.mjs lounge-tv 10.95.0.96
+```
+
+3. Config for that `tvId`: use the LG input ids (`GET /api/tvlauncher/lounge-tv/lg/inputs` lists them) as `inputId`:
+
+```json
+{
+  "name": "Lounge",
+  "uiVersion": 2,
+  "inputs": {
+    "ps5": { "inputId": "HDMI_3", "label": "PS5", "order": 10 },
+    "launcher-pc": { "inputId": "HDMI_2", "label": "Launcher PC", "hidden": true }
+  },
+  "deviceCommands": [
+    { "id": "off", "label": "Turn off", "order": 10, "url": "/api/tvlauncher/lounge-tv/lg/off", "method": "POST" }
+  ]
+}
+```
+
+4. Kiosk browser on the PC (Linux shown; on Windows use `chrome.exe --kiosk` with the same URL):
+
+```bash
+chromium --kiosk --noerrdialogs --disable-infobars "http://BACKEND:3000/tvlauncher/v2/?tvId=lounge-tv"
+```
+
+Without `nativeBridge=1` the page sends tile presses to `/api/tvlauncher/:tvId/lg/input`. There is no authentication on these routes; keep them on the LAN.
+
 ## Notes For Public Deployments
 
 This example intentionally has no authentication. Add your own auth, rate limiting, and network restrictions before exposing it beyond a trusted LAN.

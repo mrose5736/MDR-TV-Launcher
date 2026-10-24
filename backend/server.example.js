@@ -2,6 +2,7 @@ import express from "express";
 import { MongoClient } from "mongodb";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { lgCall } from "./lgtv.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -381,6 +382,36 @@ app.get("/api/tvlauncher/:tvId/local/action/:action", async (req, res) => {
 
   res.status(result.ok ? 200 : 502).json({ ok: result.ok, tvId, ...result });
 });
+
+// LG webOS TVs (no Android launcher on them): control over the LAN via SSAP.
+function lgRoute(run) {
+  return async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await lgCall(req.params.tvId, send => run(send, req))) });
+    } catch (error) {
+      res.status(error.status ?? 502).json({ ok: false, error: error.message });
+    }
+  };
+}
+
+app.get("/api/tvlauncher/:tvId/lg/inputs", lgRoute(async send => {
+  const { devices = [] } = await send("ssap://tv/getExternalInputList");
+  return { inputs: devices.map(({ id, label, connected }) => ({ id, label, connected })) };
+}));
+
+app.post("/api/tvlauncher/:tvId/lg/input", lgRoute(async (send, req) => {
+  const inputId = String(req.body?.inputId ?? "");
+  if (!/^[A-Z0-9_]{2,16}$/.test(inputId)) {
+    throw Object.assign(new Error("Invalid inputId, expected e.g. HDMI_2"), { status: 400 });
+  }
+  await send("ssap://tv/switchInput", { inputId });
+  return { inputId };
+}));
+
+app.post("/api/tvlauncher/:tvId/lg/off", lgRoute(async send => {
+  await send("ssap://system/turnOff");
+  return {};
+}));
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });

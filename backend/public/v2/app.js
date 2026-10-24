@@ -194,6 +194,29 @@ document.addEventListener('click', event => {
   }
 });
 
+// Plain browser (kiosk PC, no Android shell): run each tile through the backend instead of tvlauncher://.
+async function post(url, method, body) {
+  const response = await fetch(new URL(url, apiBase), {
+    method: method || 'GET', headers: body ? {'Content-Type': 'application/json'} : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || response.statusText);
+}
+if (!nativeBridge) document.addEventListener('click', async event => {
+  const tile = event.target.closest('a.card[href^="tvlauncher:"]');
+  if (!tile) return;
+  event.preventDefault();
+  const item = tile._item || {};
+  const lg = 'api/tvlauncher/' + encodeURIComponent(tvId) + '/lg/';
+  setStatus('Opening ' + (item.label || 'input') + '…', 'pending');
+  try {
+    if (item.url && item.requestBeforeInput !== false) await post(item.url, item.method, item.body);
+    if (item.inputId) await post(lg + 'input', 'POST', {inputId: item.inputId});
+    if (item.url && item.requestBeforeInput === false) await post(item.url, item.method, item.body);
+    setStatus('Connected', 'online');
+  } catch (error) { setStatus(error.message, 'offline'); }
+});
+
 function configureState(raw) {
   let next = '';
   try { const url = new URL(raw, location.href); if (raw && url.origin === location.origin) next = url.href; } catch (_) {}
