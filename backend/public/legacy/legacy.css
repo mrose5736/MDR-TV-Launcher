@@ -30,10 +30,17 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0e13;col
 .body{display:-webkit-flex;display:flex}
 .main{-webkit-flex:1;flex:1}
 .side{width:26vw;margin-left:3vw;-webkit-flex-shrink:0;flex-shrink:0}
-.widget{box-sizing:border-box;margin-bottom:1vh;padding:.9vw 1.2vw;border:2px solid rgba(255,255,255,.1);border-radius:1.2vw;background:rgba(29,36,46,.9)}
-.widget h3{margin:0 0 .9vh;font-size:.85vw;letter-spacing:.18em;text-transform:uppercase;color:#b8bdc7}
+.band{display:-webkit-flex;display:flex;margin-top:1.6vh}
+.band:empty{display:none}
+.widget{-webkit-flex:1;flex:1;min-width:0;box-sizing:border-box;margin-right:1.5vw;padding:.9vw 1.3vw;border:2px solid rgba(255,255,255,.1);border-radius:1.2vw;background:rgba(29,36,46,.9)}
+.widget:last-child{margin-right:0}
+.widget h3{margin:0 0 .9vh;font-size:.9vw;letter-spacing:.18em;text-transform:uppercase;color:#b8bdc7}
 .widget ul{margin:0;padding:0;list-style:none}
-.widget li{display:-webkit-flex;display:flex;-webkit-justify-content:space-between;justify-content:space-between;font-size:1.15vw;line-height:1.4}
+.widget li{display:-webkit-flex;display:flex;-webkit-justify-content:space-between;justify-content:space-between;font-size:1.2vw;line-height:1.4}
 .widget li .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:1vw}
 .widget li .when{color:#f0c77e;white-space:nowrap}
-.widget p{margin:0;font-size:1.1vw;color:#b2b7bf}
+.widget p{margin:0;font-size:1.15vw;color:#b2b7bf}
+.has-widgets .top{height:13vh}
+.has-widgets .tile{height:21vh}
+.has-widgets .tile.small{height:12vh}
+.has-widgets .section{margin-bottom:1.6vh}

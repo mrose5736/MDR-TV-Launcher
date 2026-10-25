@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.example.js",
-    "test": "node --check public/v2/app.js && node --check server.example.js && node --check lgtv.js && node --check admin.js && node --check widgets.js && node tests/widgets.test.mjs && node --check autoreturn.js && node tests/autoreturn.test.mjs && node tests/web-ui.test.cjs"
+    "test": "node --check public/v2/app.js && node --check server.example.js && node --check lgtv.js && node --check admin.js && node --check widgets.js && node tests/widgets.test.mjs && node tests/svgsize.test.mjs && node --check autoreturn.js && node tests/autoreturn.test.mjs && node tests/web-ui.test.cjs"
   },
   "dependencies": {
     "express": "^4.18.3",

@@ -142,9 +142,10 @@ const WIDGET_TITLES = {today: 'Today', upcoming: 'Up next', birthdays: 'Birthday
 const WIDGET_DEFAULTS = ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
 let widgetData = null, widgetsWanted = [], widgetFetchedAt = 0, commandCount = 0;
 function updateSidePanel() {
-  const show = commandCount > 0 || (widgetData && elements.widgets.children.length > 0);
+  const show = commandCount > 0;
   elements.controlsPanel.hidden = !show;
   $('.content-grid').classList.toggle('no-controls', !show);
+  document.body.classList.toggle('has-widgets', elements.widgets.children.length > 0);
 }
 function renderWidgets() {
   elements.widgets.replaceChildren();

@@ -8,7 +8,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'">
     <title>TV Launcher</title>
     <script src="./legacy-redirect.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20261026.1">
+    <link rel="stylesheet" href="./styles.css?v=20261026.3">
   </head>
   <body>
     <main class="launcher">
@@ -47,9 +47,10 @@
             <h2>Controls</h2>
             <div class="controls-list" id="device-controls"></div>
           </div>
-          <div class="widgets" id="widgets"></div>
         </aside>
       </div>
+
+      <section class="widget-band" id="widgets" aria-label="Household"></section>
 
       <footer>
         <span class="status-dot" id="status-dot"></span>
@@ -68,6 +69,6 @@
     <div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
     <div class="scrim" aria-hidden="true"></div>
     <script src="./silk.js?v=20261025.3" defer></script>
-    <script src="./app.js?v=20261026.1" defer></script>
+    <script src="./app.js?v=20261026.2" defer></script>
   </body>
 </html>

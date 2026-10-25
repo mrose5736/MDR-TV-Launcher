@@ -132,7 +132,8 @@
   };
 
   function sidePanel() {
-    $('side').className = 'side' + (commandCount > 0 || $('widgets').firstChild ? '' : ' off');
+    $('side').className = 'side' + (commandCount > 0 ? '' : ' off');
+    document.body.className = $('widgets').firstChild ? 'has-widgets' : '';
   }
   function renderWidgets() {
     var box = $('widgets');

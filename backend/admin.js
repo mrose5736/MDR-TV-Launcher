@@ -52,19 +52,32 @@ async function cleanInputs(inputs) {
   return result;
 }
 
+// An SVG with a viewBox but no width/height has no intrinsic size and is drawn at 0x0 inside a
+// flex box, so give it one taken from the viewBox.
+export function withSize(svg) {
+  const root = /<svg\b[^>]*>/i.exec(svg)?.[0];
+  if (!root || /\swidth\s*=/.test(root)) return svg;
+  const box = /viewBox\s*=\s*"\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*"/i.exec(root);
+  return box ? svg.replace(root, root.replace(/<svg\b/i, `<svg width="${box[1]}" height="${box[2]}"`)) : svg;
+}
+
 async function fetchIcon(spec) {
   if (!iconSpecPattern.test(spec)) throw badRequest(`Invalid icon ${spec}, expected e.g. youtube or apple-tv/mono`);
   const [slug, variant = "default"] = spec.split("/");
   const name = `${slug}-${variant}.svg`;
   const file = path.join(iconsDirectory, name);
-  if (!fs.existsSync(file)) {
+  if (fs.existsSync(file)) {
+    const current = fs.readFileSync(file, "utf8");
+    const fixed = withSize(current);
+    if (fixed !== current) fs.writeFileSync(file, fixed);
+  } else {
     const response = await fetch(`https://thesvg.org/icons/${slug}/${variant}.svg`, { signal: AbortSignal.timeout(10000) });
     let svg = await response.text();
     if (!response.ok || svg.length > 300000 || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(svg)) throw badRequest(`Icon not found on thesvg.org: ${spec}`);
     // Mono icons carry no colour of their own; the launcher is dark, so draw them white.
     if (variant === "mono") svg = svg.replace(/<svg/i, '<svg fill="#ffffff"');
     fs.mkdirSync(iconsDirectory, { recursive: true });
-    fs.writeFileSync(file, svg);
+    fs.writeFileSync(file, withSize(svg));
   }
   return `/tvlauncher/icons/${name}`;
 }
