@@ -5,24 +5,24 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden}
 .wallpaper{z-index:0;background-size:cover;background-position:center 60%;opacity:.56}
 .scrim{z-index:1;background:linear-gradient(90deg,rgba(10,14,20,.92),rgba(10,14,20,.55) 65%,rgba(10,14,20,.75)),linear-gradient(0deg,#101318 0%,transparent 65%)}
 .launcher{position:relative;z-index:2;height:100%;padding:5.5vh 4.8vw 3vh;display:flex;flex-direction:column}
-.topbar{display:flex;justify-content:space-between;align-items:flex-start;min-height:24vh}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;min-height:17vh}
 .identity h1{font-size:3.5vw;line-height:1.1;letter-spacing:-.045em;font-weight:550;margin:0}
 .identity p{font-size:1.15vw;color:var(--muted);margin:1.5vh 0 0}
 .time-block{text-align:right}.clock{display:inline-block;color:inherit;text-decoration:none;font-size:5vw;letter-spacing:-.04em;line-height:1.05;padding:.4vw .7vw;border-radius:.7vw;outline:none;border:2px solid transparent;font-weight:350}
-#date{font-size:1.35vw;color:var(--muted);margin-top:1.2vh;padding-right:.7vw}
+#date{font-size:1.35vw;color:var(--muted);margin-top:1.2vh;padding-right:.7vw}#weather{font-size:1.5vw;color:var(--amber);margin-top:.8vh;padding-right:.7vw}
 .content-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,27vw);gap:3.5vw;flex:1;min-height:0}
 .content-grid.no-controls{grid-template-columns:1fr}
 .primary-column{display:flex;flex-direction:column;gap:4.4vh;min-width:0}
 .section h2,.controls-panel h2{font-size:.95vw;letter-spacing:.18em;text-transform:uppercase;color:#b8bdc7;font-weight:600;margin:0 0 2.1vh}
-.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.5vw}
-.source-card{height:25vh;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:2vw;position:relative;overflow:hidden;background:linear-gradient(120deg,#202e46,#1a2433)}
-.card{border:2px solid rgba(255,255,255,.09);border-radius:1.2vw;outline:none;text-decoration:none;color:inherit;box-shadow:0 1vh 3vh #0002;position:relative}
+.source-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(17vw,1fr));gap:1.5vw}
+.source-card{height:36vh;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:2.2vw;position:relative;overflow:hidden;background:linear-gradient(120deg,#202e46,#1a2433)}
+.card{transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease;border:2px solid rgba(255,255,255,.09);border-radius:1.2vw;outline:none;text-decoration:none;color:inherit;box-shadow:0 1vh 3vh #0002;position:relative}
 .source-card[data-kind=sky]{background:radial-gradient(ellipse at 95% 0%,#844f7159,transparent 70%),linear-gradient(120deg,#283c5b,#1c273d)}
 .source-card[data-kind=apple]{background:radial-gradient(ellipse at 100% 0%,#435c5055,transparent 75%),linear-gradient(120deg,#273631,#1c2828)}
-.source-card .icon{height:8vh;width:auto;display:flex;align-items:center;gap:.35vw;font-size:3.2vw;font-weight:550;letter-spacing:-.04em}
-.source-card .symbol{width:3.5vw;height:6.5vh}.source-card .sky-logo{width:10vw;height:8vh;object-fit:contain;object-position:left center}
-.tile-copy{display:flex;flex-direction:column;gap:.75vh;min-width:0}.label{font-size:1.4vw;font-weight:550;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.detail{font-size:.96vw;line-height:1.35;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.source-card .icon{height:12vh;width:auto;display:flex;align-items:center;gap:.35vw;font-size:3.2vw;font-weight:550;letter-spacing:-.04em}
+.source-card .symbol{width:5vw;height:10vh}.source-card .sky-logo{width:12vw;height:11vh;object-fit:contain;object-position:left center}
+.tile-copy{display:flex;flex-direction:column;gap:.75vh;min-width:0}.label{font-size:1.9vw;font-weight:550;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.detail{font-size:1.05vw;line-height:1.35;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .source-card .tile-affordance{position:absolute;right:1.8vw;bottom:2.5vh;font-size:2vw;color:#dce2eb99}
 .quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.2vw}
 .quick-card{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;min-height:18vh;padding:1.4vw;background:linear-gradient(135deg,#282830ed,#1b2029ed)}
@@ -36,8 +36,8 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden}
 .control-row .label{font-size:1.1vw}.control-row .detail{font-size:.9vw}.control-row .tile-affordance{margin-left:auto;font-size:1.7vw;color:#aaa}
 .control-row.has-state{min-height:13vh}.control-row.has-state .tile-affordance{width:.5vw;height:.5vw;background:#707985;border-radius:50%;font-size:0;flex-shrink:0}
 .control-row.is-on{background:linear-gradient(110deg,#504334e8,#292a2ee8);border-color:#8e76524d}.control-row.is-on .detail{color:var(--amber)}.control-row.is-on .tile-affordance{background:var(--amber);box-shadow:0 0 1vw #efbb6044}.control-row.is-on .symbol{filter:brightness(0) saturate(100%) invert(84%) sepia(32%) saturate(660%) hue-rotate(343deg)}
-.card:focus{border-color:#f5dfb6;box-shadow:0 0 0 .16vw #f5dfb6,0 1vh 3vh #0003;background-color:#333b48}
+.card:focus{transform:scale(1.045);z-index:3;border-color:#f5dfb6;box-shadow:0 0 0 .2vw #f5dfb6,0 2vh 5vh #0006;background-color:#333b48}
 .clock:focus{border-color:#f5dfb6;background:#ffffff12}
 footer{display:flex;align-items:center;gap:.55vw;padding-top:2.5vh;min-height:6vh;font-size:.8vw;color:#9aa3b1}
 .status-dot{width:.35vw;height:.35vw;border-radius:50%;background:#d4ac68}.status-dot.online{background:#8ec7ac}.status-dot.offline{background:#db8d82}
-@media(max-aspect-ratio: 4/3){.launcher{padding:4vh 4vw}.content-grid{grid-template-columns:1fr 31vw;gap:2vw}.topbar{min-height:20vh}.source-card{height:23vh}.quick-card{min-height:17vh}.label{font-size:1.8vw}.detail{font-size:1.2vw}.control-row .label{font-size:1.4vw}.control-row .detail{font-size:1.15vw}}
+@media(max-aspect-ratio: 4/3){.launcher{padding:4vh 4vw}.content-grid{grid-template-columns:1fr 31vw;gap:2vw}.topbar{min-height:20vh}.source-card{height:30vh}.quick-card{min-height:17vh}.label{font-size:1.8vw}.detail{font-size:1.2vw}.control-row .label{font-size:1.4vw}.control-row .detail{font-size:1.15vw}}

@@ -43,6 +43,25 @@ function cleanInputs(inputs) {
   return result;
 }
 
+function cleanApps(apps) {
+  if (!Array.isArray(apps)) throw badRequest("webApps must be an array");
+  return apps.slice(0, 20).map((app, index) => {
+    let url;
+    try { url = new URL(String(app?.url)); } catch { throw badRequest(`Invalid URL for ${app?.label ?? "web app"}`); }
+    if (!/^https?:$/.test(url.protocol)) throw badRequest("Web app URLs must be http or https");
+    const label = String(app.label || url.hostname).trim().slice(0, 40);
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "app";
+    return { id: `${slug}-${index}`, label, url: url.href, subtitle: "Web app", order: 200 + index };
+  });
+}
+
+async function geocode(place) {
+  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=${encodeURIComponent(place)}`, { signal: AbortSignal.timeout(8000) });
+  const hit = (await response.json()).results?.[0];
+  if (!hit) throw badRequest(`Place not found: ${place}`);
+  return { place: [hit.name, hit.admin1].filter(Boolean).join(", "), latitude: hit.latitude, longitude: hit.longitude };
+}
+
 function route(handler) {
   return async (req, res) => {
     try {
@@ -74,25 +93,34 @@ export function registerAdmin(app, { tvLauncher, unixTime }) {
       name: data.name ?? tvId,
       room: data.room ?? "",
       inputs: data.inputs ?? {},
+      webApps: data.webApps ?? [],
+      weatherPlace: data.weather?.place ?? "",
       paired: paired[tvId] ?? null
     }));
     return { tvs };
   }));
 
   app.put("/api/admin/tvs/:tvId", route(async req => {
-    const { name, room = "", inputs = {} } = req.body ?? {};
+    const { name, room = "", inputs = {}, webApps = [], weatherPlace } = req.body ?? {};
     if (!String(name ?? "").trim()) throw badRequest("name is required");
     const now = unixTime();
+    const weather = String(weatherPlace ?? "").trim() ? await geocode(String(weatherPlace).trim()) : null;
     await tvLauncher.updateOne(
       { tvId: req.params.tvId },
       {
+        ...(weather || weatherPlace === undefined ? {} : { $unset: { "data.weather": "" } }),
         $set: {
+          ...(weather ? { "data.weather": weather } : {}),
+          "data.webApps": cleanApps(webApps),
           "data.name": String(name).trim().slice(0, 60),
           "data.room": String(room).trim().slice(0, 60),
           "data.inputs": cleanInputs(inputs),
           updatedAt: now
         },
-        $setOnInsert: { tvId: req.params.tvId, createdAt: now, "data.uiVersion": 2 }
+        $setOnInsert: {
+          tvId: req.params.tvId, createdAt: now, "data.uiVersion": 2,
+          "data.deviceCommands": [{ id: "off", label: "Turn TV off", order: 10, url: `/api/tvlauncher/${req.params.tvId}/lg/off`, method: "POST" }]
+        }
       },
       { upsert: true }
     );

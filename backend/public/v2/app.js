@@ -7,7 +7,7 @@ const elements = {
   name: $('#tv-name'), subtitle: $('#tv-subtitle'), clock: $('#clock'),
   sources: $('#sources'), quick: $('#quick-select'), quickSection: $('#quick-section'),
   controls: $('#device-controls'), controlsPanel: $('#controls-panel'),
-  wallpaper: $('#wallpaper'), status: $('#status'), statusDot: $('#status-dot')
+  wallpaper: $('#wallpaper'), weather: $('#weather'), apps: $('#web-apps'), appsSection: $('#apps-section'), status: $('#status'), statusDot: $('#status-dot')
 };
 let config = {}, loadedRevision, configTimer, stateTimer, stateGeneration = 0;
 let stateUrl = '', stateSnapshot = {}, stateAbort;
@@ -23,6 +23,10 @@ function nativeUrl(command, id) {
   const url = new URL('tvlauncher://' + command);
   if (id !== undefined) url.searchParams.set('id', id);
   return url.href;
+}
+// Web apps are plain links: the kiosk browser navigates to them. Only http(s) is allowed.
+function webAppUrl(raw) {
+  try { const url = new URL(raw); return /^https?:$/.test(url.protocol) ? url.href : '#'; } catch (_) { return '#'; }
 }
 function visible(selector = '.focusable') {
   return [...document.querySelectorAll(selector)].filter(el => el.offsetParent !== null);
@@ -57,7 +61,7 @@ function reconcile(container, items, zone, command) {
       tile.className = 'card focusable ' + ({sources:'source-card', quick:'quick-card', controls:'control-row'})[zone];
       tile.dataset.focusId = focusId;
       tile.dataset.zone = zone;
-      tile.href = nativeUrl(command, id);
+      tile.href = command === 'app' ? webAppUrl(item.url) : nativeUrl(command, id);
       tile.innerHTML = '<span class="icon" aria-hidden="true"></span><span class="tile-copy"><span class="label"></span><span class="detail"></span></span><span class="tile-affordance" aria-hidden="true">›</span>';
     }
     tile._item = item;
@@ -78,10 +82,11 @@ function kindFor(item, zone) {
   if (item.id === 'lights') return 'bulb';
   if (item.id === 'speaker') return 'speaker';
   if (item.id === 'guide') return 'guide';
+  if (item.id === 'off' || item.id === 'power') return 'power';
   if (item.id === 'controls') return 'controls';
   return 'tv';
 }
-const iconFiles = {apple:'apple.logo', bulb:'lightbulb.2', speaker:'hifispeaker.2', guide:'list.bullet.rectangle', controls:'slider.horizontal.3', f1:'flag.checkered', tv:'tv'};
+const iconFiles = {apple:'apple.logo', bulb:'lightbulb.2', speaker:'hifispeaker.2', guide:'list.bullet.rectangle', controls:'slider.horizontal.3', f1:'flag.checkered', power:'power', tv:'tv'};
 function updateTile(tile) {
   const item = tile._item, kind = tile.dataset.kind;
   const state = item.stateKey ? stateSnapshot[item.stateKey] : null;
@@ -134,6 +139,9 @@ function applyConfig(payload) {
     const quick = sorted(list(config.quickSelect || settings.quickSelect));
     reconcile(elements.quick, quick, 'quick', 'quick');
     elements.quickSection.hidden = !quick.length;
+    const webApps = sorted(list(config.webApps || settings.webApps));
+    reconcile(elements.apps, webApps, 'quick', 'app');
+    elements.appsSection.hidden = !webApps.length;
     const commands = sorted(list(config.deviceCommands || settings.deviceCommands || config.projectorMenu || settings.projectorMenu));
     reconcile(elements.controls, commands, 'controls', 'command');
     elements.controlsPanel.hidden = !commands.length;
@@ -146,6 +154,7 @@ function applyConfig(payload) {
     } else if (!document.activeElement?.classList.contains('focusable')) focusTile(byFocus(focused) || firstPrimary());
     setStatus('Connected', 'online');
     configureState(config.roomStateUrl || '');
+    configureWeather(config.weather);
   } catch (error) { setStatus('Configuration unavailable', 'offline'); }
 }
 window.tvLauncherApplyConfig = applyConfig;
@@ -216,6 +225,24 @@ if (!nativeBridge) document.addEventListener('click', async event => {
     setStatus('Connected', 'online');
   } catch (error) { setStatus(error.message, 'offline'); }
 });
+
+const weatherWords = code => code === 0 ? 'Clear' : code <= 2 ? 'Partly cloudy' : code === 3 ? 'Cloudy' : code <= 48 ? 'Fog' : code <= 57 ? 'Drizzle'
+  : code <= 67 ? 'Rain' : code <= 77 ? 'Snow' : code <= 82 ? 'Showers' : code <= 86 ? 'Snow showers' : 'Thunderstorm';
+let weatherKey = '', weatherTimer;
+function configureWeather(place) {
+  const key = place && isFinite(place.latitude) && isFinite(place.longitude) ? place.latitude + ',' + place.longitude : '';
+  if (key === weatherKey) return;
+  weatherKey = key; clearTimeout(weatherTimer); elements.weather.hidden = !key;
+  if (key) refreshWeather(place);
+}
+async function refreshWeather(place) {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=' + Number(place.latitude) + '&longitude=' + Number(place.longitude);
+    const current = (await (await fetch(url)).json()).current;
+    text(elements.weather, Math.round(current.temperature_2m) + '° · ' + weatherWords(current.weather_code));
+  } catch (_) {}
+  weatherTimer = setTimeout(() => refreshWeather(place), 15 * 60 * 1000);
+}
 
 function configureState(raw) {
   let next = '';

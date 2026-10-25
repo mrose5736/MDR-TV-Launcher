@@ -46,7 +46,22 @@ function tvCard(tv) {
   const launcherUrl = `${location.origin}/tvlauncher/v2/?tvId=${encodeURIComponent(tv.tvId)}`;
   const name = el('input', {type: 'text', value: tv.name, placeholder: 'Name'});
   const room = el('input', {type: 'text', value: tv.room, placeholder: 'Room'});
+  const weather = el('input', {type: 'text', value: tv.weatherPlace || '', placeholder: 'Weather town (e.g. Leeds)'});
   const ids = {tvId: tv.tvId};
+  const appRows = el('div', {className: 'rows'});
+  const appRow = app => {
+    const row = el('div', {className: 'row'});
+    const label = el('input', {type: 'text', value: app.label || '', placeholder: 'App name'});
+    const url = el('input', {type: 'text', value: app.url || '', placeholder: 'https://www.youtube.com/tv'});
+    const remove = el('button', {type: 'button', className: 'quiet', textContent: '✕', title: 'Remove'});
+    remove.onclick = () => row.remove();
+    row.append(label, url, remove);
+    row.read = () => ({label: label.value.trim(), url: url.value.trim()});
+    return row;
+  };
+  (tv.webApps || []).forEach(app => appRows.append(appRow(app)));
+  const addApp = el('button', {type: 'button', className: 'quiet', textContent: '+ Web app'});
+  addApp.onclick = () => appRows.append(appRow({}));
   const datalist = el('datalist', {id: 'ids-' + tv.tvId});
   const rows = el('div', {className: 'rows'});
   Object.entries(tv.inputs).sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99))
@@ -61,7 +76,7 @@ function tvCard(tv) {
       const value = row.read();
       inputs[row.dataset.key.startsWith('new:') ? value.inputId.toLowerCase() : row.dataset.key] = value;
     }
-    await api('/api/admin/tvs/' + tv.tvId, 'PUT', {name: name.value, room: room.value, inputs});
+    await api('/api/admin/tvs/' + tv.tvId, 'PUT', {name: name.value, room: room.value, inputs, weatherPlace: weather.value, webApps: [...appRows.children].map(r => r.read()).filter(a => a.url)});
     say('Saved ' + tv.tvId);
   });
 
@@ -92,8 +107,9 @@ function tvCard(tv) {
   copy.onclick = () => navigator.clipboard?.writeText(launcherUrl).then(() => say('Launcher URL copied'));
   return el('section', {className: 'tv'},
     el('div', {className: 'tv-head'}, el('h2', {textContent: tv.name}), el('span', {className: 'muted', textContent: tv.tvId}), badge, current),
-    el('div', {className: 'row'}, name, room, save),
+    el('div', {className: 'row'}, name, room, weather, save),
     rows, datalist, el('div', {className: 'row'}, add),
+    appRows, el('div', {className: 'row'}, addApp),
     el('div', {className: 'row'}, ip, type, key, pair),
     el('div', {className: 'row'}, el('span', {className: 'url', textContent: launcherUrl}), copy));
 }
