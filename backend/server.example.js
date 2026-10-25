@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAdmin } from "./admin.js";
 import { startAutoReturn } from "./autoreturn.js";
-import { lgInputs, lgOff, lgSwitchInput } from "./lgtv.js";
+import { lgHome, lgInputs, lgOff, lgSwitchInput } from "./lgtv.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -417,6 +417,11 @@ app.post("/api/tvlauncher/:tvId/lg/input", lgRoute(async req => {
   }
   await lgSwitchInput(req.params.tvId, inputId);
   return { inputId };
+}));
+
+app.post("/api/tvlauncher/:tvId/lg/home", lgRoute(async req => {
+  await lgHome(req.params.tvId);
+  return {};
 }));
 
 app.post("/api/tvlauncher/:tvId/lg/off", lgRoute(async req => {

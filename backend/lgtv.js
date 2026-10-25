@@ -150,6 +150,13 @@ export async function lgSwitchInput(tvId, inputId) {
   await lgSession(tv, send => send("ssap://tv/switchInput", { inputId }));
 }
 
+// Bring the TV back to its launcher app (e.g. the signage SI app) after an input switch.
+export async function lgHome(tvId) {
+  const tv = pairedTv(tvId);
+  if (!tv.homeApp) throw Object.assign(new Error("No launcher app set for this TV (homeApp in lgtv.json)"), { status: 400 });
+  await lgSession(tv, send => send("ssap://system.launcher/launch", { id: tv.homeApp }));
+}
+
 export async function lgOff(tvId) {
   const tv = pairedTv(tvId);
   if (tv.type === "netcast") return netcast(tvId, tv, () => netcastKey(tv, KEY.power));

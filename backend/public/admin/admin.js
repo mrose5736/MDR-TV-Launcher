@@ -109,6 +109,9 @@ function tvCard(tv) {
     key.hidden = true; key.value = ''; check();
   });
 
+  const home = el('button', {type: 'button', className: 'quiet', textContent: 'Open launcher', title: 'Relaunch the launcher app (needs homeApp in lgtv.json)'});
+  home.onclick = () => run(home, 'Opening launcher…', async () => { await api(`/api/tvlauncher/${tv.tvId}/lg/home`, 'POST'); say('Launcher opened'); });
+
   async function check() {
     if (!tv.paired && badge.textContent === 'not paired') return;
     try {
@@ -127,7 +130,7 @@ function tvCard(tv) {
     el('div', {className: 'row'}, name, room, weather, save),
     rows, datalist, el('div', {className: 'row'}, add),
     appRows, el('div', {className: 'row'}, addApp),
-    el('div', {className: 'row'}, ip, type, key, pair),
+    el('div', {className: 'row'}, ip, type, key, pair, home),
     el('div', {className: 'row'}, el('span', {className: 'url', textContent: launcherUrl}), copy));
 }
 
