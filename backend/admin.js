@@ -33,13 +33,15 @@ function badRequest(message) {
   return Object.assign(new Error(message), { status: 400 });
 }
 
-function cleanInputs(inputs) {
+async function cleanInputs(inputs) {
   if (inputs === null || typeof inputs !== "object" || Array.isArray(inputs)) throw badRequest("inputs must be an object");
   const result = {};
   for (const [key, value] of Object.entries(inputs)) {
     if (!inputKeyPattern.test(key)) throw badRequest(`Invalid input key: ${key}`);
     if (!inputIdPattern.test(String(value?.inputId ?? ""))) throw badRequest(`Invalid inputId for ${key}, expected e.g. HDMI_2`);
+    const icon = String(value.icon ?? "").trim();
     result[key] = {
+      ...(icon ? { icon, iconImageUrl: await fetchIcon(icon) } : {}),
       inputId: value.inputId,
       label: String(value.label ?? value.inputId).slice(0, 40),
       hidden: value.hidden === true,
@@ -163,7 +165,7 @@ export function registerAdmin(app, { tvLauncher, unixTime }) {
           "data.webApps": await cleanApps(webApps),
           "data.name": String(name).trim().slice(0, 60),
           "data.room": String(room).trim().slice(0, 60),
-          "data.inputs": cleanInputs(inputs),
+          "data.inputs": await cleanInputs(inputs),
           updatedAt: now
         },
         $setOnInsert: {

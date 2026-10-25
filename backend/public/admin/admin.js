@@ -37,6 +37,9 @@ function inputRow(key, input, ids) {
   row.dataset.key = key;
   const label = el('input', {type: 'text', value: input.label || '', placeholder: 'Label'});
   const inputId = el('input', {type: 'text', value: input.inputId || '', placeholder: 'HDMI_2', size: 10});
+  const icon = el('input', {type: 'text', value: input.icon || '', placeholder: 'Icon (e.g. playstation/mono)', size: 18});
+  icon.setAttribute('list', 'icon-suggestions');
+  icon.oninput = () => searchIcons(icon.value);
   inputId.setAttribute('list', 'ids-' + ids.tvId);
   const order = el('input', {type: 'number', className: 'order', value: input.order ?? 99, title: 'Order'});
   const hidden = el('input', {type: 'checkbox', checked: !!input.hidden});
@@ -48,8 +51,8 @@ function inputRow(key, input, ids) {
   });
   const remove = el('button', {type: 'button', className: 'quiet', textContent: '✕', title: 'Remove'});
   remove.onclick = () => row.remove();
-  row.append(label, inputId, order, el('label', {className: 'muted'}, hidden, ' hidden'), el('label', {className: 'muted', title: 'Switch back to the launcher input when this source switches off'}, back, ' return when off'), test, remove);
-  row.read = () => ({inputId: inputId.value.trim(), label: label.value.trim(), order: Number(order.value), hidden: hidden.checked, returnWhenOff: back.checked});
+  row.append(label, inputId, icon, order, el('label', {className: 'muted'}, hidden, ' hidden'), el('label', {className: 'muted', title: 'Switch back to the launcher input when this source switches off'}, back, ' return when off'), test, remove);
+  row.read = () => ({inputId: inputId.value.trim(), label: label.value.trim(), order: Number(order.value), hidden: hidden.checked, returnWhenOff: back.checked, icon: icon.value.trim()});
   return row;
 }
 
