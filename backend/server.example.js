@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAdmin } from "./admin.js";
 import { startAutoReturn } from "./autoreturn.js";
+import { getWidgets } from "./widgets.js";
 import { lgHome, lgInputs, lgOff, lgSwitchInput } from "./lgtv.js";
 
 const app = express();
@@ -428,6 +429,15 @@ app.post("/api/tvlauncher/:tvId/lg/off", lgRoute(async req => {
   await lgOff(req.params.tvId);
   return {};
 }));
+
+// Household widgets (today, up next, birthdays, F1, NFL) built from the Home app's calendar feed.
+app.get("/api/widgets", async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await getWidgets()) });
+  } catch (error) {
+    res.status(503).json({ ok: false, error: error.message === "HOME_FEED_URL is not set" ? "Widgets not configured" : "Widgets unavailable" });
+  }
+});
 
 // Weather for browsers too old to reach Open-Meteo over TLS themselves (e.g. LG signage).
 const weatherCache = new Map();

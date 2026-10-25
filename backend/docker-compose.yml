@@ -14,6 +14,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       LG_TVS_FILE: /data/lgtv.json
       ICONS_DIR: /data/icons
+      HOME_FEED_URL: ${HOME_FEED_URL:-}
+      DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Europe/London}
     volumes:
       - ./data:/data
     depends_on:

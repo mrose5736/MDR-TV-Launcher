@@ -35,7 +35,7 @@ jobs:
           load: true
           tags: smoke
       # Every module must resolve inside the image (a missing COPY once took the server down).
-      - run: docker run --rm smoke node --input-type=module -e "await import('./lgtv.js'); await import('./admin.js'); await import('./autoreturn.js')"
+      - run: docker run --rm smoke node --input-type=module -e "await import('./lgtv.js'); await import('./admin.js'); await import('./autoreturn.js'); await import('./widgets.js')"
       - uses: docker/build-push-action@v6
         with:
           context: backend

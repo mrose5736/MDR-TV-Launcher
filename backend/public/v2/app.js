@@ -6,7 +6,7 @@ const $ = selector => document.querySelector(selector);
 const elements = {
   name: $('#tv-name'), subtitle: $('#tv-subtitle'), clock: $('#clock'),
   sources: $('#sources'), quick: $('#quick-select'), quickSection: $('#quick-section'),
-  controls: $('#device-controls'), controlsPanel: $('#controls-panel'),
+  controls: $('#device-controls'), controlsPanel: $('#controls-panel'), controlsBlock: $('#controls-block'), widgets: $('#widgets'),
   wallpaper: $('#wallpaper'), weather: $('#weather'), apps: $('#web-apps'), appsSection: $('#apps-section'), status: $('#status'), statusDot: $('#status-dot')
 };
 let config = {}, loadedRevision, configTimer, stateTimer, stateGeneration = 0;
@@ -137,6 +137,62 @@ function updateTile(tile) {
   document.addEventListener('keydown', () => overlay.remove(), {once: true, capture: true});
 })();
 
+// Household widgets (built by the server from the Home app's calendar feed).
+const WIDGET_TITLES = {today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL'};
+const WIDGET_DEFAULTS = ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
+let widgetData = null, widgetsWanted = [], widgetFetchedAt = 0, commandCount = 0;
+function updateSidePanel() {
+  const show = commandCount > 0 || (widgetData && elements.widgets.children.length > 0);
+  elements.controlsPanel.hidden = !show;
+  $('.content-grid').classList.toggle('no-controls', !show);
+}
+function renderWidgets() {
+  elements.widgets.replaceChildren();
+  if (!widgetData) return;
+  widgetsWanted.forEach(id => {
+    const items = list(widgetData[id]);
+    if (!items.length && id !== 'today') return;
+    const card = document.createElement('section');
+    card.className = 'widget';
+    const heading = document.createElement('h3');
+    heading.textContent = WIDGET_TITLES[id] || id;
+    card.append(heading);
+    if (!items.length) {
+      const empty = document.createElement('p');
+      empty.textContent = 'Nothing on today';
+      card.append(empty);
+    } else {
+      const rows = document.createElement('ul');
+      items.forEach(item => {
+        const row = document.createElement('li');
+        const title = document.createElement('span');
+        title.textContent = item.title;
+        const when = document.createElement('span');
+        when.className = 'when';
+        when.textContent = item.when;
+        row.append(title, when);
+        rows.append(row);
+      });
+      card.append(rows);
+    }
+    elements.widgets.append(card);
+  });
+}
+async function loadWidgets() {
+  widgetFetchedAt = Date.now();
+  try {
+    const response = await fetch(new URL('api/widgets', apiBase), {cache: 'no-store'});
+    if (response.ok) widgetData = await response.json();
+  } catch (_) {}
+  renderWidgets();
+  updateSidePanel();
+}
+function configureWidgets(wanted) {
+  widgetsWanted = Array.isArray(wanted) ? wanted : WIDGET_DEFAULTS;
+  if (widgetsWanted.length && Date.now() - widgetFetchedAt > 5 * 60 * 1000) loadWidgets();
+  else updateSidePanel();
+}
+
 // Silk background unless a wallpaper image is configured. Plain dark page if WebGL2 is missing.
 let silk = null, silkKey = null;
 function configureBackground(wallpaper, options) {
@@ -184,8 +240,9 @@ function applyConfig(payload) {
     elements.appsSection.hidden = !webApps.length;
     const commands = sorted(list(config.deviceCommands || settings.deviceCommands || config.projectorMenu || settings.projectorMenu));
     reconcile(elements.controls, commands, 'controls', 'command');
-    elements.controlsPanel.hidden = !commands.length;
-    $('.content-grid').classList.toggle('no-controls', !commands.length);
+    commandCount = commands.length;
+    elements.controlsBlock.hidden = !commandCount;
+    configureWidgets(config.widgets);
     // A comma-separated querySelector follows DOM order, not selector priority.
     // Explicitly choose a source first. Only refocus if a node was removed.
     if (!didInitialFocus) {

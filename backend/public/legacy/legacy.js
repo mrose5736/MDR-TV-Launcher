@@ -3,6 +3,8 @@
   'use strict';
   var tvId = (/[?&]tvId=([^&]+)/.exec(location.search) || [])[1] || '';
   var config = {}, revision, tiles = [], focused = null, weatherAt = 0;
+  var widgetData = null, widgetsWanted = [], widgetsAt = 0, commandCount = 0;
+  var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL' };
   function $(id) { return document.getElementById(id); }
   function setText(el, value) { if (el.textContent !== String(value)) el.textContent = String(value); }
   function status(message, state) { setText($('status'), message); $('dot').className = 'dot ' + (state || ''); }
@@ -78,6 +80,10 @@
     fill('controls', commands, 'command', true);
     $('apps-section').className = 'section' + (apps.length ? '' : ' off');
     $('controls-section').className = 'section' + (commands.length ? '' : ' off');
+    commandCount = commands.length;
+    widgetsWanted = config.widgets instanceof Array ? config.widgets : ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
+    if (widgetsWanted.length && new Date().getTime() - widgetsAt > 300000) loadWidgets();
+    sidePanel();
     tiles = [].slice.call(document.querySelectorAll('.tile'));
     if (!focused || tiles.indexOf(focused) < 0) focusTile(tiles[0]);
   }
@@ -124,6 +130,46 @@
     if (map[code]) { move(map[code][0], map[code][1]); event.preventDefault(); }
     else if (code === 13 && focused) { activate(focused); event.preventDefault(); }
   };
+
+  function sidePanel() {
+    $('side').className = 'side' + (commandCount > 0 || $('widgets').firstChild ? '' : ' off');
+  }
+  function renderWidgets() {
+    var box = $('widgets');
+    while (box.firstChild) box.removeChild(box.firstChild);
+    if (!widgetData) return sidePanel();
+    for (var w = 0; w < widgetsWanted.length; w++) {
+      var id = widgetsWanted[w], items = widgetData[id] || [];
+      if (!items.length && id !== 'today') continue;
+      var card = document.createElement('div'), h = document.createElement('h3');
+      card.className = 'widget';
+      h.textContent = TITLES[id] || id;
+      card.appendChild(h);
+      if (!items.length) {
+        var p = document.createElement('p');
+        p.textContent = 'Nothing on today';
+        card.appendChild(p);
+      } else {
+        var ul = document.createElement('ul');
+        for (var i = 0; i < items.length; i++) {
+          var li = document.createElement('li'), t = document.createElement('span'), when = document.createElement('span');
+          t.className = 't'; t.textContent = items[i].title;
+          when.className = 'when'; when.textContent = items[i].when;
+          li.appendChild(t); li.appendChild(when); ul.appendChild(li);
+        }
+        card.appendChild(ul);
+      }
+      box.appendChild(card);
+    }
+    sidePanel();
+  }
+  function loadWidgets() {
+    widgetsAt = new Date().getTime();
+    ajax('GET', '/api/widgets', null, function (err, data) {
+      if (!err && data) widgetData = data;
+      renderWidgets();
+    });
+  }
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
