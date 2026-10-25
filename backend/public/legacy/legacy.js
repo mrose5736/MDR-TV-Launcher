@@ -34,7 +34,7 @@
     var label = String(item.label || '').toLowerCase();
     if (item.iconImageUrl) img.src = item.iconImageUrl;
     else if (label.indexOf('sky') === 0) img.src = '/tvlauncher/v2/symbols/sky-q.png';
-    else { img.src = '/tvlauncher/v2/symbols/' + (item.id === 'off' ? 'power' : 'tv') + '.svg'; img.className = 'sym'; }
+    else { img.src = './symbols/' + (item.id === 'off' ? 'power' : 'tv') + '.svg'; img.className = 'sym'; }
     wrap.appendChild(img);
     return wrap;
   }
