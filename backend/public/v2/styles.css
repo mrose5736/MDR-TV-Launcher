@@ -41,3 +41,16 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden}
 footer{display:flex;align-items:center;gap:.55vw;padding-top:2.5vh;min-height:6vh;font-size:.8vw;color:#9aa3b1}
 .status-dot{width:.35vw;height:.35vw;border-radius:50%;background:#d4ac68}.status-dot.online{background:#8ec7ac}.status-dot.offline{background:#db8d82}
 @media(max-aspect-ratio: 4/3){.launcher{padding:4vh 4vw}.content-grid{grid-template-columns:1fr 31vw;gap:2vw}.topbar{min-height:20vh}.source-card{height:30vh}.quick-card{min-height:17vh}.label{font-size:1.8vw}.detail{font-size:1.2vw}.control-row .label{font-size:1.4vw}.control-row .detail{font-size:1.15vw}}
+
+.intro{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:#0b0e13;overflow:hidden;animation:introOut .9s ease 3.1s forwards}
+.intro-glow{position:absolute;width:46vw;height:46vw;border-radius:50%;background:radial-gradient(circle,#f0c77e55 0%,#4a6fa522 45%,transparent 70%);filter:blur(2vw);opacity:0;animation:introGlow 3.6s ease-out forwards}
+.intro-copy{position:relative;text-align:center}
+.intro-greeting{margin:0 0 2vh;font-size:1.3vw;letter-spacing:.42em;text-transform:uppercase;color:var(--amber);opacity:0;animation:introUp 1s ease .5s forwards}
+.intro-name{margin:0;font-size:6vw;font-weight:350;letter-spacing:-.045em;opacity:0;filter:blur(1.4vw);animation:introReveal 1.3s cubic-bezier(.2,.7,.2,1) 1s forwards}
+.intro-line{height:.18vw;width:0;margin:3vh auto 0;background:linear-gradient(90deg,transparent,var(--amber),transparent);animation:introLine 1.4s ease 1.7s forwards}
+@keyframes introGlow{0%{opacity:0;transform:scale(.4)}40%{opacity:1}100%{opacity:.85;transform:scale(1.25)}}
+@keyframes introUp{from{opacity:0;transform:translateY(1.5vh)}to{opacity:1;transform:none}}
+@keyframes introReveal{from{opacity:0;filter:blur(1.4vw);transform:scale(.96)}to{opacity:1;filter:blur(0);transform:none}}
+@keyframes introLine{to{width:22vw}}
+@keyframes introOut{to{opacity:0;transform:scale(1.04);visibility:hidden}}
+@media(prefers-reduced-motion:reduce){.intro{display:none}}

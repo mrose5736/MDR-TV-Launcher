@@ -7,7 +7,7 @@
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'; base-uri 'none'">
     <title>TV Launcher</title>
-    <link rel="stylesheet" href="./styles.css?v=20261025.1">
+    <link rel="stylesheet" href="./styles.css?v=20261025.2">
   </head>
   <body>
     <main class="launcher">
@@ -52,8 +52,16 @@
         <span id="status">Connecting…</span>
       </footer>
     </main>
+    <div class="intro" id="intro" aria-hidden="true">
+      <div class="intro-glow"></div>
+      <div class="intro-copy">
+        <p class="intro-greeting" id="intro-greeting"></p>
+        <h1 class="intro-name" id="intro-name"></h1>
+        <div class="intro-line"></div>
+      </div>
+    </div>
     <div class="wallpaper" id="wallpaper" aria-hidden="true"></div>
     <div class="scrim" aria-hidden="true"></div>
-    <script src="./app.js?v=20261025.1" defer></script>
+    <script src="./app.js?v=20261025.2" defer></script>
   </body>
 </html>

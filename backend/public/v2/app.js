@@ -118,6 +118,25 @@ function updateTile(tile) {
   tile.setAttribute('aria-label', (item.label || 'Device') + '. ' + detail);
 }
 
+// Start-up animation: plays when the launcher starts, not on every config-driven reload.
+(function intro() {
+  const overlay = $('#intro');
+  if (!overlay) return;
+  let skip = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  try {
+    skip = skip || Date.now() - Number(sessionStorage.getItem('intro-at') || 0) < 10 * 60 * 1000;
+    sessionStorage.setItem('intro-at', Date.now());
+  } catch (_) {}
+  if (skip) { overlay.remove(); return; }
+  const hour = new Date().getHours();
+  text($('#intro-greeting'), hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening');
+  let name = '';
+  try { name = localStorage.getItem('tv-name:' + tvId) || ''; } catch (_) {}
+  text($('#intro-name'), name || 'Welcome');
+  overlay.addEventListener('animationend', event => { if (event.animationName === 'introOut') overlay.remove(); });
+  document.addEventListener('keydown', () => overlay.remove(), {once: true, capture: true});
+})();
+
 function applyConfig(payload) {
   try {
     const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -128,6 +147,7 @@ function applyConfig(payload) {
     loadedRevision = revision;
     const focused = document.activeElement?.dataset?.focusId || currentFocus;
     text(elements.name, config.name || 'Your TV');
+    try { localStorage.setItem('tv-name:' + tvId, config.name || ''); } catch (_) {}
     text(elements.subtitle, config.subtitle || '');
     elements.subtitle.hidden = !config.subtitle;
     const wallpaper = settings.backgroundImageUrl || settings.wallpaperUrl || '';
