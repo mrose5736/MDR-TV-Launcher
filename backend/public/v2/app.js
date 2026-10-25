@@ -137,6 +137,25 @@ function updateTile(tile) {
   document.addEventListener('keydown', () => overlay.remove(), {once: true, capture: true});
 })();
 
+// Silk background unless a wallpaper image is configured. Plain dark page if WebGL2 is missing.
+let silk = null, silkKey = null;
+function configureBackground(wallpaper, options) {
+  const holder = $('#silk');
+  if (!holder || !window.TVSilk) return;
+  holder.hidden = !!wallpaper;
+  document.body.classList.toggle('has-silk', !wallpaper && !!silk);
+  if (wallpaper) return;
+  const key = JSON.stringify(options || {});
+  if (!silk && silkKey === null) {
+    silk = window.TVSilk.start(holder, options);
+    silkKey = key;
+    document.body.classList.toggle('has-silk', !!silk);
+  } else if (silk && key !== silkKey) {
+    silk.update(options);
+    silkKey = key;
+  }
+}
+
 function applyConfig(payload) {
   try {
     const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -155,6 +174,7 @@ function applyConfig(payload) {
       elements.wallpaper.dataset.url = wallpaper;
       elements.wallpaper.style.backgroundImage = wallpaper ? 'url(' + JSON.stringify(wallpaper) + ')' : '';
     }
+    configureBackground(wallpaper, config.background);
     reconcile(elements.sources, sorted(Object.entries(config.inputs || {}).map(([key, value]) => ({key, ...value}))), 'sources', 'input');
     const quick = sorted(list(config.quickSelect || settings.quickSelect));
     reconcile(elements.quick, quick, 'quick', 'quick');

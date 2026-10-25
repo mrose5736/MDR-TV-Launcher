@@ -54,3 +54,6 @@ footer{display:flex;align-items:center;gap:.55vw;padding-top:2.5vh;min-height:6v
 @keyframes introLine{to{width:22vw}}
 @keyframes introOut{to{opacity:0;transform:scale(1.04);visibility:hidden}}
 @media(prefers-reduced-motion:reduce){.intro{display:none}}
+.silk{position:fixed;inset:0;z-index:0;pointer-events:none;background:#101318}
+.silk[hidden]{display:none}
+.has-silk .scrim{background:linear-gradient(90deg,rgba(10,14,20,.5),rgba(10,14,20,.12) 60%,rgba(10,14,20,.35)),linear-gradient(0deg,rgba(10,14,20,.55) 0%,transparent 55%)}
