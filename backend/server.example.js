@@ -25,6 +25,16 @@ app.use("/tvlauncher/v2", express.static(path.join(currentDirectory, "public", "
   }
 }));
 
+app.use("/tvlauncher/legacy", express.static(path.join(currentDirectory, "public", "legacy"), {
+  index: "index.html",
+  maxAge: 0,
+  setHeaders(response) {
+    response.setHeader("Cache-Control", "no-cache");
+    response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' https:; object-src 'none'");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+  }
+}));
+
 const client = new MongoClient(mongoUrl);
 await client.connect();
 
