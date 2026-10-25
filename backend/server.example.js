@@ -424,6 +424,29 @@ app.post("/api/tvlauncher/:tvId/lg/off", lgRoute(async req => {
   return {};
 }));
 
+// Weather for browsers too old to reach Open-Meteo over TLS themselves (e.g. LG signage).
+const weatherCache = new Map();
+app.get("/api/weather", async (req, res) => {
+  const latitude = Number(req.query.latitude);
+  const longitude = Number(req.query.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+    return res.status(400).json({ ok: false, error: "latitude and longitude required" });
+  }
+  const key = `${latitude.toFixed(2)},${longitude.toFixed(2)}`;
+  const hit = weatherCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return res.json(hit.data);
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=${latitude}&longitude=${longitude}`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error("upstream");
+    const data = await response.json();
+    if (weatherCache.size > 50) weatherCache.clear();
+    weatherCache.set(key, { at: Date.now(), data });
+    res.json(data);
+  } catch {
+    res.status(502).json({ ok: false, error: "Weather unavailable" });
+  }
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });

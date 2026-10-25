@@ -30,8 +30,14 @@ export function lgSession(tv, run, timeoutMs = 10000) {
     let counter = 0;
     const timer = setTimeout(() => finish(reject, new Error("LG TV timed out")), timeoutMs);
 
+    // Closing a socket that is still connecting fires "error" again, which would re-enter
+    // this function and recurse until the stack overflows; settle exactly once.
+    let finished = false;
     const finish = (settle, value) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
+      ws.onerror = ws.onmessage = null;
       try { ws.close(); } catch {}
       settle(value);
     };
@@ -45,7 +51,7 @@ export function lgSession(tv, run, timeoutMs = 10000) {
     ws.onopen = () => ws.send(JSON.stringify({
       type: "register",
       id: "reg",
-      payload: { forcePairing: false, pairingType: "PROMPT", "client-key": tv.clientKey, manifest }
+      payload: { forcePairing: false, pairingType: "PROMPT", "client-key": tv.clientKey, manifest: { ...manifest, permissions: tv.permissions ?? manifest.permissions } }
     }));
     ws.onmessage = async event => {
       const message = JSON.parse(event.data);

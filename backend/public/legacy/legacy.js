@@ -143,7 +143,7 @@
   function weather() {
     var w = config.weather;
     if (!w || isNaN(w.latitude) || isNaN(w.longitude)) return;
-    ajax('GET', 'https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=' + Number(w.latitude) + '&longitude=' + Number(w.longitude), null, function (err, data) {
+    ajax('GET', '/api/weather?latitude=' + Number(w.latitude) + '&longitude=' + Number(w.longitude), null, function (err, data) {
       if (!err && data && data.current) setText($('weather'), Math.round(data.current.temperature_2m) + '° · ' + words(data.current.weather_code));
     });
   }
