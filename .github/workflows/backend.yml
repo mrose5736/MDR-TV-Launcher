@@ -32,6 +32,13 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: backend
+          load: true
+          tags: smoke
+      # Every module must resolve inside the image (a missing COPY once took the server down).
+      - run: docker run --rm smoke node --input-type=module -e "await import('./lgtv.js'); await import('./admin.js'); await import('./autoreturn.js')"
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
           push: true
           tags: |
             ghcr.io/mrose5736/mdr-tv-launcher-backend:latest
