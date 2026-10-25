@@ -167,6 +167,19 @@ export function pairedTvs() {
   return Object.fromEntries(Object.entries(readCredentials()).map(([id, tv]) => [id, { ip: tv.ip, type: tv.type ?? "webos" }]));
 }
 
+// webOS only: input list (with each port's signal flag) and the active input, in one session.
+export function lgSnapshot(tvId) {
+  return lgSession(pairedTv(tvId), async send => {
+    const { devices = [] } = await send("ssap://tv/getExternalInputList");
+    const app = await send("ssap://com.webos.applicationManager/getForegroundAppInfo");
+    const hdmi = /hdmi(\d)/.exec(app.appId ?? "")?.[1];
+    return {
+      current: hdmi ? `HDMI_${hdmi}` : app.appId,
+      inputs: devices.map(({ id, label, connected }) => ({ id, label, connected }))
+    };
+  });
+}
+
 export async function lgStatus(tvId) {
   const tv = pairedTv(tvId);
   const type = tv.type ?? "webos";
@@ -174,10 +187,8 @@ export async function lgStatus(tvId) {
     if (type === "netcast") {
       return { type, ip: tv.ip, online: true, current: await netcastCurrentInput(tv), inputs: await lgInputs(tvId) };
     }
-    const inputs = await lgInputs(tvId);
-    const app = await lgSession(tv, send => send("ssap://com.webos.applicationManager/getForegroundAppInfo"));
-    const hdmi = /hdmi(\d)/.exec(app.appId ?? "")?.[1];
-    return { type, ip: tv.ip, online: true, current: hdmi ? `HDMI_${hdmi}` : app.appId, inputs };
+    const { current, inputs } = await lgSnapshot(tvId);
+    return { type, ip: tv.ip, online: true, current, inputs };
   } catch (error) {
     return { type, ip: tv.ip, online: false, error: error.message };
   }

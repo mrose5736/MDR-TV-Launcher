@@ -43,6 +43,7 @@ function cleanInputs(inputs) {
       inputId: value.inputId,
       label: String(value.label ?? value.inputId).slice(0, 40),
       hidden: value.hidden === true,
+      returnWhenOff: value.returnWhenOff === true,
       order: Number.isFinite(Number(value.order)) ? Number(value.order) : 99
     };
   }

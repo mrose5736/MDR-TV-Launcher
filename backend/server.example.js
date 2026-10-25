@@ -3,6 +3,7 @@ import { MongoClient } from "mongodb";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAdmin } from "./admin.js";
+import { startAutoReturn } from "./autoreturn.js";
 import { lgInputs, lgOff, lgSwitchInput } from "./lgtv.js";
 
 const app = express();
@@ -30,6 +31,7 @@ await client.connect();
 const db = client.db(dbName);
 const tvLauncher = db.collection("TVLauncher");
 registerAdmin(app, { tvLauncher, unixTime });
+startAutoReturn(tvLauncher);
 
 function unixTime() {
   return Math.floor(Date.now() / 1000);

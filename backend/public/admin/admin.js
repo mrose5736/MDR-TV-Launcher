@@ -40,6 +40,7 @@ function inputRow(key, input, ids) {
   inputId.setAttribute('list', 'ids-' + ids.tvId);
   const order = el('input', {type: 'number', className: 'order', value: input.order ?? 99, title: 'Order'});
   const hidden = el('input', {type: 'checkbox', checked: !!input.hidden});
+  const back = el('input', {type: 'checkbox', checked: !!input.returnWhenOff});
   const test = el('button', {type: 'button', className: 'quiet', textContent: 'Test'});
   test.onclick = () => run(test, 'Switching…', async () => {
     await api(`/api/tvlauncher/${ids.tvId}/lg/input`, 'POST', {inputId: inputId.value});
@@ -47,8 +48,8 @@ function inputRow(key, input, ids) {
   });
   const remove = el('button', {type: 'button', className: 'quiet', textContent: '✕', title: 'Remove'});
   remove.onclick = () => row.remove();
-  row.append(label, inputId, order, el('label', {className: 'muted'}, hidden, ' hidden'), test, remove);
-  row.read = () => ({inputId: inputId.value.trim(), label: label.value.trim(), order: Number(order.value), hidden: hidden.checked});
+  row.append(label, inputId, order, el('label', {className: 'muted'}, hidden, ' hidden'), el('label', {className: 'muted', title: 'Switch back to the launcher input when this source switches off'}, back, ' return when off'), test, remove);
+  row.read = () => ({inputId: inputId.value.trim(), label: label.value.trim(), order: Number(order.value), hidden: hidden.checked, returnWhenOff: back.checked});
   return row;
 }
 
