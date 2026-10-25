@@ -15,6 +15,7 @@ services:
       LG_TVS_FILE: /data/lgtv.json
       ICONS_DIR: /data/icons
       HOME_FEED_URL: ${HOME_FEED_URL:-}
+      HOME_TV_API_URL: ${HOME_TV_API_URL:-}
       DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Europe/London}
     volumes:
       - ./data:/data

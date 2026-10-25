@@ -4,7 +4,7 @@
   var tvId = (/[?&]tvId=([^&]+)/.exec(location.search) || [])[1] || '';
   var config = {}, revision, tiles = [], focused = null, weatherAt = 0;
   var widgetData = null, widgetsWanted = [], widgetsAt = 0, commandCount = 0;
-  var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL' };
+  var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent' };
   function $(id) { return document.getElementById(id); }
   function setText(el, value) { if (el.textContent !== String(value)) el.textContent = String(value); }
   function status(message, state) { setText($('status'), message); $('dot').className = 'dot ' + (state || ''); }

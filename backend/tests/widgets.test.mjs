@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildWidgets, parseIcs } from "../widgets.js";
+import { buildWidgets, parseIcs, pickExtras } from "../widgets.js";
 
 const ics = [
   "BEGIN:VCALENDAR", "VERSION:2.0",
@@ -26,4 +26,15 @@ assert.match(w.f1[0].when, /Sat 31 Oct · 12:00/);
 assert.ok(!w.upcoming.some(e => /F1|Birthday|Long past/.test(e.title)));
 assert.equal(w.upcoming[0].title, "Parents' evening");
 assert.deepEqual(w.nfl, []);
+
+// Extras from the Home app: only well-formed rows survive, clipped to size.
+const extra = pickExtras({
+  countdowns: [{ title: "Holiday", when: "in 12 days" }, { title: 5, when: "x" }, { title: "No when" }],
+  flights: [{ title: "x".repeat(200), when: "Sat" }],
+  transport: "nope"
+});
+assert.deepEqual(extra.countdowns, [{ title: "Holiday", when: "in 12 days" }]);
+assert.equal(extra.flights[0].title.length, 80);
+assert.deepEqual(extra.transport, []);
+assert.deepEqual(extra.advent, []);
 console.log("PASS: widgets feed parsing and grouping");

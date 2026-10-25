@@ -4,6 +4,7 @@
 const TIME_ZONE = process.env.DISPLAY_TIMEZONE ?? "Europe/London";
 const CACHE_MS = 5 * 60 * 1000;
 let cache = { at: 0, events: null };
+let extras = { at: 0, data: null };
 
 const unescapeText = value => value.replace(/\\([nN,;\\])/g, (_m, c) => (c === "n" || c === "N" ? "\n" : c));
 const dayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE });
@@ -81,6 +82,35 @@ export function buildWidgets(rawEvents, now = new Date()) {
   };
 }
 
+// Optional second source: the Home app's /api/tv/<token> (countdowns, flights, Supertram, advent).
+// Rows arrive as { title, when }; keep only those, clipped, since this text goes to the TVs.
+export function pickExtras(payload) {
+  const out = {};
+  for (const key of ["countdowns", "flights", "transport", "advent"]) {
+    const rows = Array.isArray(payload?.[key]) ? payload[key] : [];
+    out[key] = rows
+      .filter(row => typeof row?.title === "string" && typeof row?.when === "string")
+      .slice(0, 4)
+      .map(row => ({ title: row.title.slice(0, 80), when: row.when.slice(0, 40) }));
+  }
+  return out;
+}
+
+async function getExtras() {
+  const url = process.env.HOME_TV_API_URL;
+  if (!url) return {};
+  if (!extras.data || Date.now() - extras.at > CACHE_MS) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      extras = { at: Date.now(), data: pickExtras(await response.json()) };
+    } catch {
+      extras.at = Date.now() - CACHE_MS + 30000; // retry in 30s; keep serving the last good copy
+    }
+  }
+  return extras.data ?? {};
+}
+
 export async function getWidgets() {
   const url = process.env.HOME_FEED_URL;
   if (!url) throw new Error("HOME_FEED_URL is not set");
@@ -95,5 +125,5 @@ export async function getWidgets() {
       cache.at = Date.now() - CACHE_MS + 30000;
     }
   }
-  return { updated: new Date(cache.at).toISOString(), ...buildWidgets(cache.events) };
+  return { updated: new Date(cache.at).toISOString(), ...buildWidgets(cache.events), ...(await getExtras()) };
 }
