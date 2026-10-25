@@ -1,10 +1,16 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lgStatus, netcastFinishPair, netcastStartPair, pairWebos, pairedTvs } from "./lgtv.js";
 
 const adminDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), "public", "admin");
+// Logos come from thesvg.org, are downloaded once and kept beside the pairing keys
+// (not in git: they are third-party trademarks).
+const iconsDirectory = process.env.ICONS_DIR ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "icons");
+const iconSpecPattern = /^[a-z0-9][a-z0-9-]{0,60}(\/[a-zA-Z]{3,15})?$/;
+let registry = { loadedAt: 0, icons: [] };
 const tvIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
 const privateIpv4 = /^(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}$/;
 const inputKeyPattern = /^[a-z0-9_-]{1,40}$/i;
@@ -43,16 +49,51 @@ function cleanInputs(inputs) {
   return result;
 }
 
-function cleanApps(apps) {
+async function fetchIcon(spec) {
+  if (!iconSpecPattern.test(spec)) throw badRequest(`Invalid icon ${spec}, expected e.g. youtube or apple-tv/mono`);
+  const [slug, variant = "default"] = spec.split("/");
+  const name = `${slug}-${variant}.svg`;
+  const file = path.join(iconsDirectory, name);
+  if (!fs.existsSync(file)) {
+    const response = await fetch(`https://thesvg.org/icons/${slug}/${variant}.svg`, { signal: AbortSignal.timeout(10000) });
+    let svg = await response.text();
+    if (!response.ok || svg.length > 300000 || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(svg)) throw badRequest(`Icon not found on thesvg.org: ${spec}`);
+    // Mono icons carry no colour of their own; the launcher is dark, so draw them white.
+    if (variant === "mono") svg = svg.replace(/<svg/i, '<svg fill="#ffffff"');
+    fs.mkdirSync(iconsDirectory, { recursive: true });
+    fs.writeFileSync(file, svg);
+  }
+  return `/tvlauncher/icons/${name}`;
+}
+
+async function searchIcons(query) {
+  if (Date.now() - registry.loadedAt > 3600000) {
+    const response = await fetch("https://thesvg.org/api/registry.json", { signal: AbortSignal.timeout(20000) });
+    registry = { loadedAt: Date.now(), icons: (await response.json()).icons ?? [] };
+  }
+  const needle = String(query).toLowerCase().trim();
+  if (needle.length < 2) return [];
+  return registry.icons
+    .filter(icon => icon.slug.includes(needle) || String(icon.title).toLowerCase().includes(needle) || icon.aliases?.some(alias => String(alias).toLowerCase().includes(needle)))
+    .slice(0, 12)
+    .map(({ slug, title, variants }) => ({ slug, title, variants }));
+}
+
+async function cleanApps(apps) {
   if (!Array.isArray(apps)) throw badRequest("webApps must be an array");
-  return apps.slice(0, 20).map((app, index) => {
+  return Promise.all(apps.slice(0, 20).map(async (app, index) => {
+  if (!Array.isArray(apps)) throw badRequest("webApps must be an array");
     let url;
     try { url = new URL(String(app?.url)); } catch { throw badRequest(`Invalid URL for ${app?.label ?? "web app"}`); }
     if (!/^https?:$/.test(url.protocol)) throw badRequest("Web app URLs must be http or https");
     const label = String(app.label || url.hostname).trim().slice(0, 40);
     const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "app";
-    return { id: `${slug}-${index}`, label, url: url.href, subtitle: "Web app", order: 200 + index };
-  });
+    const icon = String(app.icon ?? "").trim();
+    return {
+      id: `${slug}-${index}`, label, url: url.href, subtitle: "Web app", order: 200 + index,
+      ...(icon ? { icon, iconImageUrl: await fetchIcon(icon) } : {})
+    };
+  }));
 }
 
 async function geocode(place) {
@@ -74,6 +115,13 @@ function route(handler) {
 }
 
 export function registerAdmin(app, { tvLauncher, unixTime }) {
+  app.use("/tvlauncher/icons", express.static(iconsDirectory, {
+    maxAge: "7d",
+    setHeaders(response) {
+      response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      response.setHeader("X-Content-Type-Options", "nosniff");
+    }
+  }));
   app.use(["/admin", "/api/admin"], requireAdmin);
   app.use("/admin", express.static(adminDirectory, {
     index: "index.html",
@@ -111,7 +159,7 @@ export function registerAdmin(app, { tvLauncher, unixTime }) {
         ...(weather || weatherPlace === undefined ? {} : { $unset: { "data.weather": "" } }),
         $set: {
           ...(weather ? { "data.weather": weather } : {}),
-          "data.webApps": cleanApps(webApps),
+          "data.webApps": await cleanApps(webApps),
           "data.name": String(name).trim().slice(0, 60),
           "data.room": String(room).trim().slice(0, 60),
           "data.inputs": cleanInputs(inputs),
@@ -126,6 +174,8 @@ export function registerAdmin(app, { tvLauncher, unixTime }) {
     );
     return { tvId: req.params.tvId };
   }));
+
+  app.get("/api/admin/icons", route(async req => ({ icons: await searchIcons(req.query.q ?? "") })));
 
   app.get("/api/admin/tvs/:tvId/status", route(async req => ({ status: await lgStatus(req.params.tvId) })));
 

@@ -13,6 +13,7 @@ services:
       MONGO_DB: tv_launcher
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       LG_TVS_FILE: /data/lgtv.json
+      ICONS_DIR: /data/icons
     volumes:
       - ./data:/data
     depends_on:

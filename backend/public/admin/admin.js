@@ -15,6 +15,18 @@ async function api(path, method = 'GET', body) {
   if (!response.ok || result.ok === false) throw new Error(result.error || response.statusText);
   return result;
 }
+let iconTimer;
+function searchIcons(query) {
+  clearTimeout(iconTimer);
+  iconTimer = setTimeout(async () => {
+    if (query.trim().length < 2 || query.includes('/')) return;
+    try {
+      const {icons} = await api('/api/admin/icons?q=' + encodeURIComponent(query.trim()));
+      $('#icon-suggestions').replaceChildren(...icons.flatMap(icon => (icon.variants || ['default']).map(variant =>
+        el('option', {value: variant === 'default' ? icon.slug : icon.slug + '/' + variant, label: icon.title + ' (' + variant + ')'}))));
+    } catch (_) {}
+  }, 250);
+}
 async function run(button, label, task) {
   button.disabled = true; say(label);
   try { await task(); } catch (error) { say(error.message, true); } finally { button.disabled = false; }
@@ -53,10 +65,14 @@ function tvCard(tv) {
     const row = el('div', {className: 'row'});
     const label = el('input', {type: 'text', value: app.label || '', placeholder: 'App name'});
     const url = el('input', {type: 'text', value: app.url || '', placeholder: 'https://www.youtube.com/tv'});
+    const icon = el('input', {type: 'text', value: app.icon || '', placeholder: 'Icon (e.g. youtube)', size: 16});
+    icon.setAttribute('list', 'icon-suggestions');
+    icon.oninput = () => searchIcons(icon.value);
+    const preview = el('img', {src: app.iconImageUrl || '', alt: '', height: 28, hidden: !app.iconImageUrl});
     const remove = el('button', {type: 'button', className: 'quiet', textContent: '✕', title: 'Remove'});
     remove.onclick = () => row.remove();
-    row.append(label, url, remove);
-    row.read = () => ({label: label.value.trim(), url: url.value.trim()});
+    row.append(label, url, icon, preview, remove);
+    row.read = () => ({label: label.value.trim(), url: url.value.trim(), icon: icon.value.trim()});
     return row;
   };
   (tv.webApps || []).forEach(app => appRows.append(appRow(app)));
