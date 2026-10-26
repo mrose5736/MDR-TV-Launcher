@@ -242,6 +242,7 @@ function applyConfig(payload) {
     const commands = sorted(list(config.deviceCommands || settings.deviceCommands || config.projectorMenu || settings.projectorMenu));
     reconcile(elements.controls, commands, 'controls', 'command');
     commandCount = commands.length;
+    document.body.classList.toggle('has-apps', webApps.length > 0);
     elements.controlsBlock.hidden = !commandCount;
     configureWidgets(config.widgets);
     // A comma-separated querySelector follows DOM order, not selector priority.

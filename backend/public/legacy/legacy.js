@@ -3,7 +3,7 @@
   'use strict';
   var tvId = (/[?&]tvId=([^&]+)/.exec(location.search) || [])[1] || '';
   var config = {}, revision, tiles = [], focused = null, weatherAt = 0;
-  var widgetData = null, widgetsWanted = [], widgetsAt = 0, commandCount = 0;
+  var widgetData = null, widgetsWanted = [], widgetsAt = 0, commandCount = 0, appCount = 0;
   var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent' };
   function $(id) { return document.getElementById(id); }
   function setText(el, value) { if (el.textContent !== String(value)) el.textContent = String(value); }
@@ -81,6 +81,7 @@
     $('apps-section').className = 'section' + (apps.length ? '' : ' off');
     $('controls-section').className = 'section' + (commands.length ? '' : ' off');
     commandCount = commands.length;
+    appCount = apps.length;
     widgetsWanted = config.widgets instanceof Array ? config.widgets : ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
     if (widgetsWanted.length && new Date().getTime() - widgetsAt > 300000) loadWidgets();
     sidePanel();
@@ -131,9 +132,12 @@
     else if (code === 13 && focused) { activate(focused); event.preventDefault(); }
   };
 
+  function layoutClass() {
+    document.body.className = ($('widgets').firstChild ? 'has-widgets' : '') + (appCount > 0 ? ' has-apps' : '');
+  }
   function sidePanel() {
     $('side').className = 'side' + (commandCount > 0 ? '' : ' off');
-    document.body.className = $('widgets').firstChild ? 'has-widgets' : '';
+    layoutClass();
   }
   function renderWidgets() {
     var box = $('widgets');
@@ -161,6 +165,11 @@
         card.appendChild(ul);
       }
       box.appendChild(card);
+    }
+    var cards = box.childNodes, n = cards.length;
+    for (var c = 0; c < n; c++) {
+      cards[c].style.width = 'calc((100% - ' + (n - 1) * 1.5 + 'vw) / ' + n + ')';
+      cards[c].style.marginRight = c < n - 1 ? '1.5vw' : '0';
     }
     sidePanel();
   }

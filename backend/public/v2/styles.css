@@ -75,3 +75,12 @@ footer{display:flex;align-items:center;gap:.55vw;padding-top:2.5vh;min-height:6v
 .has-widgets .primary-column{gap:2vh}
 .has-widgets .widget-band{margin-top:1.5vh}
 .has-widgets footer{min-height:3.5vh;padding-top:.8vh}
+body.has-widgets:not(.has-apps) .source-card{height:23vh}
+body.has-widgets:not(.has-apps) .widget{padding:1.2vw 1.6vw}
+body.has-widgets:not(.has-apps) .widget h3{font-size:1.05vw;margin-bottom:1.4vh}
+body.has-widgets:not(.has-apps) .widget li{font-size:1.25vw;align-items:flex-start}
+body.has-widgets:not(.has-apps) .widget li span:first-child{white-space:normal}
+body.has-widgets:not(.has-apps) .widget p{font-size:1.4vw}
+body.has-widgets:not(.has-apps) .widget-band{margin-top:2.5vh}
+body.has-widgets:not(.has-apps) .widget li{display:block;margin-bottom:1.1vh}
+body.has-widgets:not(.has-apps) .widget li .when{display:block;font-size:.9em}

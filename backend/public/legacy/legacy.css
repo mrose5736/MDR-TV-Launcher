@@ -32,15 +32,31 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0e13;col
 .side{width:26vw;margin-left:3vw;-webkit-flex-shrink:0;flex-shrink:0}
 .band{display:-webkit-flex;display:flex;margin-top:1.6vh}
 .band:empty{display:none}
-.widget{-webkit-flex:1;flex:1;min-width:0;box-sizing:border-box;margin-right:1.5vw;padding:.9vw 1.3vw;border:2px solid rgba(255,255,255,.1);border-radius:1.2vw;background:rgba(29,36,46,.9)}
-.widget:last-child{margin-right:0}
+.widget{-webkit-flex:none;flex:none;box-sizing:border-box;padding:.9vw 1.3vw;border:2px solid rgba(255,255,255,.1);border-radius:1.2vw;background:rgba(29,36,46,.9)}
 .widget h3{margin:0 0 .9vh;font-size:.9vw;letter-spacing:.18em;text-transform:uppercase;color:#b8bdc7}
 .widget ul{margin:0;padding:0;list-style:none}
-.widget li{display:-webkit-flex;display:flex;-webkit-justify-content:space-between;justify-content:space-between;font-size:1.2vw;line-height:1.4}
-.widget li .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:1vw}
-.widget li .when{color:#f0c77e;white-space:nowrap}
+.widget li{display:-webkit-flex;display:flex;-webkit-align-items:flex-start;align-items:flex-start;-webkit-justify-content:space-between;justify-content:space-between;font-size:1.2vw;line-height:1.35;margin-bottom:.4vh}
+.widget li .t{-webkit-flex:1 1 auto;flex:1 1 auto;min-width:0;margin-right:.8vw}
+.widget li .when{-webkit-flex:none;flex:none;color:#f0c77e;white-space:nowrap}
 .widget p{margin:0;font-size:1.15vw;color:#b2b7bf}
-.has-widgets .top{height:13vh}
-.has-widgets .tile{height:21vh}
-.has-widgets .tile.small{height:12vh}
+#date,#weather{display:inline-block}
+#weather{margin-left:.8vw}
+#weather:empty{display:none}
+.has-widgets .top{height:auto;min-height:13vh}
+.has-widgets #clock{font-size:4.6vw}
 .has-widgets .section{margin-bottom:1.6vh}
+.has-widgets .tile{height:26vh}
+.has-widgets .tile.small{height:14vh}
+.has-widgets .widget{padding:1.1vw 1.5vw}
+.has-widgets .widget h3{font-size:1vw;margin-bottom:1.2vh}
+.has-widgets .widget li{font-size:1.35vw}
+.has-widgets .page{padding-bottom:5vh}
+.has-apps.has-widgets .tile{height:21vh}
+.has-apps.has-widgets .tile.small{height:12vh}
+.has-apps.has-widgets .widget{padding:.9vw 1.3vw}
+.has-apps.has-widgets .widget h3{font-size:.9vw;margin-bottom:.9vh}
+.has-apps.has-widgets .widget li{font-size:1.2vw}
+.has-widgets:not(.has-apps) .widget li{display:block;margin-bottom:1.1vh}
+.has-widgets:not(.has-apps) .widget li .t{display:block;margin:0}
+.has-widgets:not(.has-apps) .widget li .when{display:block;font-size:.9em;margin-top:.2vh}
+.has-apps.has-widgets .widget li .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
