@@ -4,7 +4,10 @@
   var tvId = (/[?&]tvId=([^&]+)/.exec(location.search) || [])[1] || '';
   var config = {}, revision, tiles = [], focused = null, weatherAt = 0;
   var widgetData = null, widgetsWanted = [], widgetsAt = 0, commandCount = 0, appCount = 0;
-  var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent' };
+  var TITLES = { today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent', forecast: 'Forecast' };
+  var LIMITS = { today: 4, upcoming: 4, birthdays: 3, f1: 3, nfl: 2, countdowns: 3, flights: 3, transport: 4, advent: 1, forecast: 4 };
+  var INFO_DEFAULT = ['today', 'upcoming', 'forecast', 'f1', 'birthdays', 'nfl', 'countdowns', 'flights', 'transport'];
+  var info = false;
   function $(id) { return document.getElementById(id); }
   function setText(el, value) { if (el.textContent !== String(value)) el.textContent = String(value); }
   function status(message, state) { setText($('status'), message); $('dot').className = 'dot ' + (state || ''); }
@@ -82,7 +85,8 @@
     $('controls-section').className = 'section' + (commands.length ? '' : ' off');
     commandCount = commands.length;
     appCount = apps.length;
-    widgetsWanted = config.widgets instanceof Array ? config.widgets : ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
+    info = config.layout === 'info';
+    widgetsWanted = config.widgets instanceof Array ? config.widgets : (info ? INFO_DEFAULT : ['today', 'f1', 'birthdays', 'upcoming', 'nfl']);
     if (widgetsWanted.length && new Date().getTime() - widgetsAt > 300000) loadWidgets();
     sidePanel();
     tiles = [].slice.call(document.querySelectorAll('.tile'));
@@ -126,6 +130,7 @@
     focusTile(best);
   }
   document.onkeydown = function (event) {
+    if (info) return; // information screen: nothing to select
     var code = event.keyCode;
     var map = { 37: [-1, 0], 38: [0, -1], 39: [1, 0], 40: [0, 1] };
     if (map[code]) { move(map[code][0], map[code][1]); event.preventDefault(); }
@@ -133,7 +138,7 @@
   };
 
   function layoutClass() {
-    document.body.className = ($('widgets').firstChild ? 'has-widgets' : '') + (appCount > 0 ? ' has-apps' : '');
+    document.body.className = info ? 'info' : ($('widgets').firstChild ? 'has-widgets' : '') + (appCount > 0 ? ' has-apps' : '');
   }
   function sidePanel() {
     $('side').className = 'side' + (commandCount > 0 ? '' : ' off');
@@ -144,7 +149,7 @@
     while (box.firstChild) box.removeChild(box.firstChild);
     if (!widgetData) return sidePanel();
     for (var w = 0; w < widgetsWanted.length; w++) {
-      var id = widgetsWanted[w], items = widgetData[id] || [];
+      var id = widgetsWanted[w], items = (widgetData[id] || []).slice(0, info ? 6 : (LIMITS[id] || 4));
       if (!items.length && id !== 'today') continue;
       var card = document.createElement('div'), h = document.createElement('h3');
       card.className = 'widget';
@@ -166,16 +171,17 @@
       }
       box.appendChild(card);
     }
-    var cards = box.childNodes, n = cards.length;
+    var cards = box.childNodes, n = cards.length, cols = info ? 3 : n;
     for (var c = 0; c < n; c++) {
-      cards[c].style.width = 'calc((100% - ' + (n - 1) * 1.5 + 'vw) / ' + n + ')';
-      cards[c].style.marginRight = c < n - 1 ? '1.5vw' : '0';
+      cards[c].style.width = 'calc((100% - ' + (cols - 1) * 1.5 + 'vw) / ' + cols + ')';
+      cards[c].style.marginRight = (c + 1) % cols === 0 ? '0' : '1.5vw';
     }
     sidePanel();
   }
   function loadWidgets() {
     widgetsAt = new Date().getTime();
-    ajax('GET', '/api/widgets', null, function (err, data) {
+    var where = config.weather && !isNaN(config.weather.latitude) ? '?latitude=' + Number(config.weather.latitude) + '&longitude=' + Number(config.weather.longitude) : '';
+    ajax('GET', '/api/widgets' + where, null, function (err, data) {
       if (!err && data) widgetData = data;
       renderWidgets();
     });

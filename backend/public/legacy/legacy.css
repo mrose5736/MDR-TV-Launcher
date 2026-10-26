@@ -60,3 +60,16 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0e13;col
 .has-widgets:not(.has-apps) .widget li .t{display:block;margin:0}
 .has-widgets:not(.has-apps) .widget li .when{display:block;font-size:.9em;margin-top:.2vh}
 .has-apps.has-widgets .widget li .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Information layout: no sources, a grid of small widgets using the whole screen. */
+body.info .body{display:none}
+body.info .top{height:auto;margin-bottom:1vh}
+body.info #clock{font-size:6.5vw}
+body.info #date{font-size:1.7vw}
+body.info #weather{font-size:1.9vw}
+body.info .band{-webkit-flex-wrap:wrap;flex-wrap:wrap;margin-top:1.5vh}
+body.info .widget{margin-bottom:1.7vh;padding:1vw 1.3vw}
+body.info .widget h3{font-size:.85vw;margin-bottom:1vh}
+body.info .widget li{display:-webkit-flex;display:flex;-webkit-align-items:flex-start;align-items:flex-start;font-size:1.1vw;line-height:1.3;margin-bottom:.6vh}
+body.info .widget li .t{white-space:normal;margin-right:1vw}
+body.info .widget li .when{font-size:1em;margin:0}
+body.info .widget p{font-size:1.1vw}

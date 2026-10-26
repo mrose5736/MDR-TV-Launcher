@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildWidgets, parseIcs, pickExtras } from "../widgets.js";
+import { buildWidgets, forecastRows, parseIcs, pickExtras } from "../widgets.js";
 
 const ics = [
   "BEGIN:VCALENDAR", "VERSION:2.0",
@@ -37,4 +37,12 @@ assert.deepEqual(extra.countdowns, [{ title: "Holiday", when: "in 12 days" }]);
 assert.equal(extra.flights[0].title.length, 80);
 assert.deepEqual(extra.transport, []);
 assert.deepEqual(extra.advent, []);
+
+// Forecast rows from an Open-Meteo daily block.
+const rows = forecastRows({ time: ["2026-10-26", "2026-10-27", "2026-10-28"], temperature_2m_max: [13.4, 11.6, 9], temperature_2m_min: [7.2, 5.5, 4], weather_code: [3, 61, 0] }, "2026-10-26");
+assert.deepEqual(rows[0], { title: "Today", when: "13°/7° Cloudy" });
+assert.equal(rows[1].title, "Tomorrow");
+assert.equal(rows[1].when, "12°/6° Rain");
+assert.equal(rows[2].title, "Wed 28 Oct");
+assert.deepEqual(forecastRows(undefined, "2026-10-26"), []);
 console.log("PASS: widgets feed parsing and grouping");

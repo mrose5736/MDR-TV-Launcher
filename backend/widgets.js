@@ -68,17 +68,17 @@ export function buildWidgets(rawEvents, now = new Date()) {
   const events = rawEvents.map(normalise).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
   const live = events.filter(e => e.endMs >= now.getTime() || e.endDay > today);
   const general = live.filter(e => !isF1(e) && !isNfl(e) && !isBirthday(e));
-  const race = list => list.slice(0, 3).map(e => ({ title: e.title, when: when(e, today) }));
+  const race = (list, n = 4) => list.slice(0, n).map(e => ({ title: e.title, when: when(e, today) }));
 
   return {
-    today: general.filter(e => e.startDay <= today && e.endDay >= today).slice(0, 4).map(e => ({ title: e.title, when: e.allDay ? "All day" : e.startTime })),
-    upcoming: general.filter(e => e.startDay > today).slice(0, 4).map(e => ({ title: e.title, when: when(e, today) })),
-    birthdays: events.filter(e => isBirthday(e) && e.startDay >= today).slice(0, 3).map(e => {
+    today: general.filter(e => e.startDay <= today && e.endDay >= today).slice(0, 6).map(e => ({ title: e.title, when: e.allDay ? "All day" : e.startTime })),
+    upcoming: general.filter(e => e.startDay > today).slice(0, 8).map(e => ({ title: e.title, when: when(e, today) })),
+    birthdays: events.filter(e => isBirthday(e) && e.startDay >= today).slice(0, 5).map(e => {
       const days = dayNumber(e.startDay) - dayNumber(today);
       return { title: e.title, when: days === 0 ? "Today" : days === 1 ? "Tomorrow" : `in ${days} days` };
     }),
     f1: race(live.filter(isF1)),
-    nfl: race(live.filter(isNfl))
+    nfl: race(live.filter(isNfl), 3)
   };
 }
 
@@ -111,7 +111,37 @@ async function getExtras() {
   return extras.data ?? {};
 }
 
-export async function getWidgets() {
+const weatherWords = code => code === 0 ? "Clear" : code <= 2 ? "Partly cloudy" : code === 3 ? "Cloudy" : code <= 48 ? "Fog" : code <= 57 ? "Drizzle"
+  : code <= 67 ? "Rain" : code <= 77 ? "Snow" : code <= 82 ? "Showers" : code <= 86 ? "Snow showers" : "Thunderstorm";
+
+// Five-day outlook from Open-Meteo's daily block, as ready-to-show rows.
+export function forecastRows(daily, today) {
+  const days = daily?.time ?? [];
+  return days.slice(0, 5).map((day, i) => ({
+    title: label(day, today),
+    when: `${Math.round(daily.temperature_2m_max[i])}°/${Math.round(daily.temperature_2m_min[i])}° ${weatherWords(daily.weather_code[i])}`
+  }));
+}
+
+const forecasts = new Map();
+async function getForecast(latitude, longitude) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return [];
+  const key = `${latitude.toFixed(2)},${longitude.toFixed(2)}`;
+  const hit = forecasts.get(key);
+  if (hit && Date.now() - hit.at < 15 * 60 * 1000) return hit.rows;
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5&latitude=${latitude}&longitude=${longitude}`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error("upstream");
+    const rows = forecastRows((await response.json()).daily, dayOf(new Date()));
+    if (forecasts.size > 20) forecasts.clear();
+    forecasts.set(key, { at: Date.now(), rows });
+    return rows;
+  } catch {
+    return hit?.rows ?? [];
+  }
+}
+
+export async function getWidgets({ latitude, longitude } = {}) {
   const url = process.env.HOME_FEED_URL;
   if (!url) throw new Error("HOME_FEED_URL is not set");
   if (!cache.events || Date.now() - cache.at > CACHE_MS) {
@@ -125,5 +155,5 @@ export async function getWidgets() {
       cache.at = Date.now() - CACHE_MS + 30000;
     }
   }
-  return { updated: new Date(cache.at).toISOString(), ...buildWidgets(cache.events), ...(await getExtras()) };
+  return { updated: new Date(cache.at).toISOString(), ...buildWidgets(cache.events), ...(await getExtras()), forecast: await getForecast(Number(latitude), Number(longitude)) };
 }

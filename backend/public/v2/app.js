@@ -138,7 +138,8 @@ function updateTile(tile) {
 })();
 
 // Household widgets (built by the server from the Home app's calendar feed).
-const WIDGET_TITLES = {today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent'};
+const WIDGET_TITLES = {today: 'Today', upcoming: 'Up next', birthdays: 'Birthdays', f1: 'Formula 1', nfl: 'NFL', countdowns: 'Countdowns', flights: 'Flights', transport: 'Supertram', advent: 'Advent', forecast: 'Forecast'};
+const WIDGET_LIMITS = {today: 4, upcoming: 4, birthdays: 3, f1: 3, nfl: 2, countdowns: 3, flights: 3, transport: 4, advent: 1, forecast: 4};
 const WIDGET_DEFAULTS = ['today', 'f1', 'birthdays', 'upcoming', 'nfl'];
 let widgetData = null, widgetsWanted = [], widgetFetchedAt = 0, commandCount = 0;
 function updateSidePanel() {
@@ -151,7 +152,7 @@ function renderWidgets() {
   elements.widgets.replaceChildren();
   if (!widgetData) return;
   widgetsWanted.forEach(id => {
-    const items = list(widgetData[id]);
+    const items = list(widgetData[id]).slice(0, WIDGET_LIMITS[id] || 4);
     if (!items.length && id !== 'today') return;
     const card = document.createElement('section');
     card.className = 'widget';
@@ -182,7 +183,8 @@ function renderWidgets() {
 async function loadWidgets() {
   widgetFetchedAt = Date.now();
   try {
-    const response = await fetch(new URL('api/widgets', apiBase), {cache: 'no-store'});
+    const where = config.weather && isFinite(config.weather.latitude) ? '?latitude=' + config.weather.latitude + '&longitude=' + config.weather.longitude : '';
+    const response = await fetch(new URL('api/widgets' + where, apiBase), {cache: 'no-store'});
     if (response.ok) widgetData = await response.json();
   } catch (_) {}
   renderWidgets();

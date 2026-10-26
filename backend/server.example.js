@@ -431,9 +431,9 @@ app.post("/api/tvlauncher/:tvId/lg/off", lgRoute(async req => {
 }));
 
 // Household widgets (today, up next, birthdays, F1, NFL) built from the Home app's calendar feed.
-app.get("/api/widgets", async (_req, res) => {
+app.get("/api/widgets", async (req, res) => {
   try {
-    res.json({ ok: true, ...(await getWidgets()) });
+    res.json({ ok: true, ...(await getWidgets({ latitude: req.query.latitude, longitude: req.query.longitude })) });
   } catch (error) {
     res.status(503).json({ ok: false, error: error.message === "HOME_FEED_URL is not set" ? "Widgets not configured" : "Widgets unavailable" });
   }
